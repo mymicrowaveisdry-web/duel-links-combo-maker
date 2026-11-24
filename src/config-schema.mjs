@@ -24,6 +24,7 @@ export const appConfigSchema = z.object({
     catalog: relative,
     imageManifest: relative,
     cardImages: folder,
+    skills: relative,
   }),
   local: z.object({
     cardResponse: relative,

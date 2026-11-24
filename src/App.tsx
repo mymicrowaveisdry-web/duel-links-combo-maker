@@ -25,6 +25,7 @@ import { ActionMenu } from "./components/ActionMenu";
 import type { ActionRequest } from "./components/ActionMenu";
 import { BoardPanel } from "./components/BoardPanel";
 import { BoardSettings } from "./components/BoardSettings";
+import { DuelistSummary, SkillDialog } from "./components/Duelist";
 import { PlaybackBar, SideTabs, playbackSpeeds } from "./components/Playback";
 import type { PlaybackSpeed } from "./components/Playback";
 import { Timeline } from "./components/Timeline";
@@ -38,7 +39,11 @@ import type { ArtworkLookup } from "./data/artwork";
 import { loadCatalog } from "./data/catalog";
 import type { CardDefinition } from "./data/catalog";
 import { appConfig } from "./config";
-import { buildCardAction, recordingTargetError } from "./domain/actions";
+import {
+  buildCardAction,
+  buildDuelAction,
+  recordingTargetError,
+} from "./domain/actions";
 import { canPlace, zones } from "./domain/board";
 import type { BoardAction, Placement, Position, ZoneId } from "./domain/board";
 import type { ActionKind, ComboAction } from "./domain/combo";
@@ -50,6 +55,7 @@ import {
   moveStep,
   notify,
   record,
+  setDuelist,
   setView,
   truncateFrom,
   updateStep,
@@ -96,6 +102,7 @@ export default function App() {
   // Playback runs only while this exact document is shown in Replay.
   const [playing, setPlaying] = useState<object | null>(null);
   const [confirmReplace, setConfirmReplace] = useState(false);
+  const [skillOpen, setSkillOpen] = useState(false);
   const [settingsError, setSettingsError] = useState("");
   const [request, setRequest] = useState<ActionRequest | null>(null);
   const settingsDialog = useRef<HTMLDialogElement>(null);
@@ -296,6 +303,19 @@ export default function App() {
         : undefined;
     dispatch(record(action, newCards, at));
     setRequest(null);
+  }
+
+  /** Records the Skill as it reads now. Following steps group under it. */
+  function activateSkill() {
+    if (blocked()) return;
+    recordAction(
+      buildDuelAction(board, "activate-skill", {
+        skill: doc.skill ?? {
+          name: "Unspecified Skill",
+          origin: "unspecified",
+        },
+      }),
+    );
   }
 
   function viewStep(index: number) {
@@ -522,6 +542,16 @@ export default function App() {
             />
             <BoardPanel
               recording={recording}
+              duelist={
+                <DuelistSummary
+                  character={doc.character}
+                  skill={doc.skill}
+                  canEdit={mode !== "replay"}
+                  canActivate={recording}
+                  onEdit={() => setSkillOpen(true)}
+                  onActivate={activateSkill}
+                />
+              }
               mode={mode}
               transport={
                 <PlaybackBar
@@ -716,6 +746,16 @@ export default function App() {
           Card data and images by YGOPRODeck
         </a>
       </footer>
+      <SkillDialog
+        open={skillOpen}
+        character={doc.character}
+        skill={doc.skill}
+        onSave={(value) => {
+          dispatch(setDuelist(value));
+          setSkillOpen(false);
+        }}
+        onClose={() => setSkillOpen(false)}
+      />
       <ActionMenu
         request={request}
         board={board}

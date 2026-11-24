@@ -41,6 +41,8 @@ export interface BoardPanelProps {
   transport: ReactNode;
   /** Status shown above the mat, such as recording behind the latest step. */
   banner: ReactNode;
+  /** Character and Skill summary shown with the player's caption. */
+  duelist: ReactNode;
 }
 
 const zoneIcons: Partial<Record<Zone["kind"], typeof Triangle>> = {
@@ -370,7 +372,9 @@ export function BoardPanel(props: BoardPanelProps) {
           {slot("player-banished", true)}
           <PlayerRows slot={slot} pendulum={board.pendulum.player} />
         </div>
-        <SeatCaption side="player" board={board} />
+        <SeatCaption side="player" board={board}>
+          {props.duelist}
+        </SeatCaption>
       </div>
       <Hand props={props} />
     </section>

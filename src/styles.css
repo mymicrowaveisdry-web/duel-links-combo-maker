@@ -1885,3 +1885,94 @@ a {
 .board-panel:has(.view-banner) {
   --chrome: 485px;
 }
+
+/* Character and Skill */
+.duelist {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  font-size: 0.8rem;
+}
+.duelist p {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.duelist p svg {
+  flex: none;
+  color: var(--accent);
+}
+.duelist-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.duelist-actions .subtle-button {
+  min-height: 32px;
+  font-size: 0.78rem;
+  color: #1d1405;
+  background: #fcd34d;
+  border-color: #fcd34d;
+}
+.duelist-actions .text-button {
+  min-height: 32px;
+  font-size: 0.78rem;
+}
+@container (min-width: 640px) {
+  .player-caption .duelist {
+    justify-items: end;
+    text-align: right;
+    max-width: 190px;
+  }
+}
+.skill-dialog {
+  width: min(560px, calc(100% - 24px));
+}
+.choice-list.choice-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+.inline-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+.inline-check input {
+  width: 17px;
+  height: 17px;
+  accent-color: #a78bfa;
+}
+.skill-picker .choice-empty {
+  margin-top: 8px;
+}
+.skill-results {
+  max-height: 220px;
+  margin-top: 6px;
+}
+.skill-text {
+  display: grid;
+  gap: 5px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-left: 3px solid #fcd34d;
+  border-radius: 0 6px 6px 0;
+  background: var(--control);
+  font-size: 0.86rem;
+  line-height: 1.45;
+  max-height: 180px;
+  overflow: auto;
+}
+.skill-text p {
+  white-space: pre-line;
+}
+.skill-text a {
+  color: var(--accent);
+  justify-self: start;
+}

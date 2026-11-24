@@ -117,10 +117,25 @@ export const actionKinds = [
 ] as const;
 export type ActionKind = (typeof actionKinds)[number];
 
+/**
+ * A Skill as it read when the combo was written. Storing the text keeps old combos
+ * understandable after a Skill is reworded or a dataset changes.
+ */
 export interface SkillSnapshot {
   id?: string;
   name: string;
   description?: string;
+  /** Where the text came from: the bundled snapshot, the author, or nothing. */
+  origin: "dataset" | "custom" | "unspecified";
+  sourceName?: string;
+  sourceUrl?: string;
+  /** When the snapshot was taken, as an ISO date-time. */
+  capturedAt?: string;
+}
+
+/** The character is free text. The bundled data has no character list. */
+export interface CharacterSnapshot {
+  name: string;
 }
 
 export interface ComboAction {
@@ -149,6 +164,8 @@ export interface ComboDocument {
   id: string;
   title: string;
   format: "speed-duel";
+  character?: CharacterSnapshot;
+  skill?: SkillSnapshot;
   initialBoard: Board;
   steps: ComboStep[];
   cards: CardBook;

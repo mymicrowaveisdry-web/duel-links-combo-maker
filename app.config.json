@@ -5,7 +5,8 @@
   "served": {
     "catalog": "data/cards.json",
     "imageManifest": "data/card-images.json",
-    "cardImages": "images/cards/small/"
+    "cardImages": "images/cards/small/",
+    "skills": "data/skills.json"
   },
   "local": {
     "cardResponse": "data/local/ygoprodeck-duel-links.json"

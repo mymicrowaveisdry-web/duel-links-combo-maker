@@ -16,7 +16,13 @@ import {
   replay,
   withCards,
 } from "./domain/combo";
-import type { ComboAction, ComboDocument, ComboStep } from "./domain/combo";
+import type {
+  CharacterSnapshot,
+  ComboAction,
+  ComboDocument,
+  ComboStep,
+  SkillSnapshot,
+} from "./domain/combo";
 
 /** Setup edits the starting board, Record adds steps, Replay only views them. */
 export type Mode = "setup" | "recording" | "replay";
@@ -359,6 +365,42 @@ const combo = createSlice({
         editSteps(state, steps, now, `Step moved to position ${target + 1}.`);
       },
     },
+    /** Sets the character and Skill for the whole combo. null clears either one. */
+    setDuelist: {
+      prepare: (value: {
+        character: CharacterSnapshot | null;
+        skill: SkillSnapshot | null;
+      }) => stamp(value),
+      reducer(
+        state,
+        {
+          payload: { value, now },
+        }: PayloadAction<{
+          value: {
+            character: CharacterSnapshot | null;
+            skill: SkillSnapshot | null;
+          };
+          now: string;
+        }>,
+      ) {
+        const doc = { ...current(state.doc), updatedAt: now };
+        delete doc.character;
+        delete doc.skill;
+        const name = value.character?.name.trim();
+        const next: ComboDocument = {
+          ...doc,
+          ...(name ? { character: { name } } : {}),
+          ...(value.skill ? { skill: value.skill } : {}),
+        };
+        commit(
+          state,
+          { doc: next, openGroup: state.openGroup },
+          value.skill
+            ? `Skill set to ${value.skill.name}.`
+            : "Combo set to use no Skill.",
+        );
+      },
+    },
     setView(state, { payload }: PayloadAction<number | null>) {
       const last = state.doc.steps.length;
       state.view =
@@ -429,6 +471,7 @@ export const {
   truncateFrom,
   duplicateStep,
   moveStep,
+  setDuelist,
   setView,
   armInsert,
   notify,
