@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "base": "./",
+  "publicDir": "public",
+  "served": {
+    "catalog": "data/cards.json",
+    "imageManifest": "data/card-images.json",
+    "cardImages": "images/cards/small/"
+  },
+  "local": {
+    "cardResponse": "data/local/ygoprodeck-duel-links.json"
+  },
+  "sources": {
+    "cardInfo": "https://db.ygoprodeck.com/api/v7/cardinfo.php?format=duel%20links&misc=yes",
+    "cardImages": "https://images.ygoprodeck.com/images/cards_small/",
+    "attribution": "https://ygoprodeck.com/api-guide/"
+  }
+}
