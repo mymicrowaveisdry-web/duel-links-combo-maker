@@ -1,13 +1,17 @@
 // Browser-local persistence with IndexedDB. Nothing leaves the device. Every stored
 // document is revalidated on load, so a damaged record cannot corrupt the editor.
+import type { CardDefinition } from "../data/catalog";
+import { cardSchema } from "../data/catalog-schema.mjs";
 import type { ComboDocument } from "../domain/combo";
 import { validateComboDocument } from "../exports/json";
 
 const databaseName = "duel-links-combo-maker";
-const databaseVersion = 1;
+// Version 2 added the custom card library.
+const databaseVersion = 2;
 const comboStore = "combos";
 const draftStore = "drafts";
 const draftKey = "current";
+const customCardStore = "customCards";
 
 export interface SavedComboSummary {
   id: string;
@@ -56,6 +60,8 @@ function database() {
         db.createObjectStore(comboStore, { keyPath: "id" });
       if (!db.objectStoreNames.contains(draftStore))
         db.createObjectStore(draftStore, { keyPath: "id" });
+      if (!db.objectStoreNames.contains(customCardStore))
+        db.createObjectStore(customCardStore, { keyPath: "id" });
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => {
@@ -148,4 +154,27 @@ export async function loadDraft() {
       store.get(draftKey),
     ),
   );
+}
+
+/** The author's custom cards, available in every combo. Invalid records are skipped. */
+export async function listCustomCards(): Promise<CardDefinition[]> {
+  const records = await transact<unknown[]>(
+    customCardStore,
+    "readonly",
+    (store) => store.getAll(),
+  );
+  return records
+    .flatMap((record) => {
+      const parsed = cardSchema.safeParse(record);
+      return parsed.success && parsed.data.custom ? [parsed.data] : [];
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export async function saveCustomCard(card: CardDefinition) {
+  await transact(customCardStore, "readwrite", (store) => store.put(card));
+}
+
+export async function deleteCustomCard(id: number) {
+  await transact(customCardStore, "readwrite", (store) => store.delete(id));
 }

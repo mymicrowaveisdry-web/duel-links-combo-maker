@@ -153,7 +153,9 @@ const combo = createSlice({
             ? [action.card]
             : action.type === "load-deck"
               ? [...action.main, ...action.extra]
-              : [];
+              : action.type === "alternatives"
+                ? action.cards
+                : [];
         const next: ComboDocument = {
           ...doc,
           initialBoard: result.board,
@@ -429,6 +431,44 @@ const combo = createSlice({
         );
       },
     },
+    /**
+     * Replaces the combo's snapshot of an edited custom card. The change is refused
+     * when it would make the starting board or a recorded step invalid.
+     */
+    reviseCard: {
+      prepare: (value: CardDefinition) => stamp(value),
+      reducer(
+        state,
+        {
+          payload: { value, now },
+        }: PayloadAction<{ value: CardDefinition; now: string }>,
+      ) {
+        const doc = current(state.doc);
+        const key = String(value.id);
+        if (!doc.cards[key]?.custom || !value.custom) return;
+        const next: ComboDocument = {
+          ...doc,
+          cards: { ...doc.cards, [key]: value },
+          updatedAt: now,
+        };
+        const failure = replay(next).failure;
+        if (failure) {
+          state.notice = {
+            message:
+              failure.index < 0
+                ? `That edit doesn't fit the starting board: ${failure.message}`
+                : `That edit would break step ${failure.index + 1}: ${failure.message}`,
+            error: true,
+          };
+          return;
+        }
+        commit(
+          state,
+          { doc: next, openGroup: state.openGroup },
+          `Updated ${value.name} in this combo.`,
+        );
+      },
+    },
     setDeckAware: {
       prepare: (value: boolean) => stamp(value),
       reducer(
@@ -544,6 +584,7 @@ export const {
   setDuelist,
   setDetails,
   setDeckAware,
+  reviseCard,
   loadDocument,
   setView,
   armInsert,

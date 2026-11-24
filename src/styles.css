@@ -13,6 +13,7 @@
   --accent: #c4b5fd;
   --primary: #7c3aed;
   --danger: #fca5a5;
+  --custom: #fcd34d;
   --corner: 12px;
 }
 
@@ -2275,4 +2276,218 @@ input[type="file"]:focus-visible + *,
   .history-buttons {
     padding-left: 4px;
   }
+}
+
+/* Opening-hand placeholders: Token art, own label, dashed outline and a tag. */
+.card-face.is-placeholder {
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+}
+.card-face.is-placeholder::before {
+  content: "Placeholder";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  right: 2px;
+  z-index: 1;
+  padding: 1px 2px;
+  border-radius: 3px;
+  background: #120e1bd9;
+  color: var(--accent);
+  font-size: 0.5rem;
+  font-weight: 700;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
+}
+.card-face.is-placeholder:not(.has-image) {
+  position: relative;
+}
+.placeholder-maker {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  margin-top: 10px;
+}
+.placeholder-maker label {
+  display: grid;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.placeholder-maker select {
+  min-height: 36px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--control);
+  color: var(--text);
+}
+.alternatives {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+}
+.alternatives h4 {
+  margin: 0;
+  font-size: 0.84rem;
+  color: var(--muted);
+}
+.alternatives ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.alternatives li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.86rem;
+}
+
+/* Custom cards (guide §8.6): a solid amber outline and a tag set them apart from
+   verified dataset cards and from dashed placeholders. */
+.card-face.is-custom {
+  position: relative;
+  outline: 2px solid var(--custom);
+  outline-offset: -2px;
+}
+.card-face.is-custom::before {
+  content: "Custom";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  right: 2px;
+  z-index: 1;
+  padding: 1px 2px;
+  border-radius: 3px;
+  background: #120e1bd9;
+  color: var(--custom);
+  font-size: 0.5rem;
+  font-weight: 700;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
+}
+.custom-note {
+  display: block;
+  color: var(--custom);
+}
+.inspector > .subtle-button {
+  margin-top: 10px;
+}
+.custom-card-dialog {
+  width: min(620px, calc(100% - 24px));
+}
+.dialog-hint {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+.custom-card-layout {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.custom-image {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  margin-top: 14px;
+}
+.custom-image-frame {
+  display: grid;
+  place-items: center;
+  width: 120px;
+  aspect-ratio: 168 / 246;
+  overflow: hidden;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  background: var(--control);
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.custom-image-frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.custom-fields textarea {
+  width: 100%;
+  resize: vertical;
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--control);
+  color: var(--text);
+}
+.custom-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.custom-flags label {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  color: var(--text);
+  cursor: pointer;
+}
+.custom-card-dialog .dialog-actions {
+  flex-wrap: wrap;
+  align-items: center;
+}
+.delete-custom,
+.confirm-delete {
+  margin-right: auto;
+}
+.delete-custom {
+  color: var(--danger);
+}
+.confirm-delete {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--danger);
+  font-size: 0.84rem;
+}
+.danger-button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 6px 11px;
+  border: 1px solid #b45353;
+  border-radius: 8px;
+  background: #5b1f2a;
+  color: #fff1f1;
+  font-size: 0.84rem;
+  font-weight: 620;
+}
+.danger-button:hover {
+  background: #742835;
+}
+@media (max-width: 560px) {
+  .custom-card-layout {
+    grid-template-columns: 1fr;
+  }
+}
+.custom-image .subtle-button {
+  width: 100%;
+  padding-inline: 8px;
+  white-space: nowrap;
 }

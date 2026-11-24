@@ -1,6 +1,7 @@
 import {
   ChevronLeft,
   ChevronRight,
+  Plus,
   Search,
   SlidersHorizontal,
 } from "lucide-react";
@@ -8,6 +9,7 @@ import { useDeferredValue, useMemo, useState } from "react";
 import { emptyFilters, filterCards, indexCards } from "../data/catalog";
 import type { CardDefinition, Catalog, CardFilters } from "../data/catalog";
 import { monsterKinds } from "../data/catalog-schema.mjs";
+import { genericPlaceholders } from "../data/placeholders";
 import { CatalogRow } from "./cards";
 
 const pageSize = 30;
@@ -24,9 +26,19 @@ export function CatalogPanel({
   onSelect,
   onRetry,
   active,
+  placeholders,
+  onCreatePlaceholder,
+  customCards,
+  onNewCustom,
 }: {
   data: CatalogState;
   selectedId?: number;
+  /** Archetype placeholders created in this session or found in the open combo. */
+  placeholders: readonly CardDefinition[];
+  onCreatePlaceholder: (archetype: string) => void;
+  /** The author's custom cards plus any custom cards in the open combo. */
+  customCards: CardDefinition[];
+  onNewCustom: () => void;
   onSelect: (card: CardDefinition) => void;
   onRetry: () => void;
   active: boolean;
@@ -34,12 +46,34 @@ export function CatalogPanel({
   const [filters, setFilters] = useState(emptyFilters);
   const [filtersOpen, toggleFilters] = useState(false);
   const [page, setPage] = useState(0);
-  const cards = data.status === "ready" ? data.value.cards : noCards;
+  const [view, setView] = useState<"catalog" | "placeholders" | "custom">(
+    "catalog",
+  );
+  const showPlaceholders = view === "placeholders";
+  const special = view !== "catalog";
+  const [placeholderArchetype, setPlaceholderArchetype] = useState("");
+  const catalogCards = data.status === "ready" ? data.value.cards : noCards;
+  const placeholderCards = useMemo(
+    () => [...genericPlaceholders, ...placeholders],
+    [placeholders],
+  );
+  const cards =
+    view === "placeholders"
+      ? placeholderCards
+      : view === "custom"
+        ? customCards
+        : catalogCards;
   const index = useMemo(() => indexCards(cards), [cards]);
   const deferredFilters = useDeferredValue(filters);
   const results = useMemo(
-    () => filterCards(index, deferredFilters),
-    [index, deferredFilters],
+    () =>
+      filterCards(
+        index,
+        special
+          ? { ...emptyFilters, query: deferredFilters.query }
+          : deferredFilters,
+      ),
+    [index, deferredFilters, special],
   );
   const attributes = useMemo(
     () =>
@@ -54,10 +88,12 @@ export function CatalogPanel({
     () =>
       [
         ...new Set(
-          cards.flatMap((card) => (card.archetype ? [card.archetype] : [])),
+          catalogCards.flatMap((card) =>
+            card.archetype ? [card.archetype] : [],
+          ),
         ),
       ].sort(),
-    [cards],
+    [catalogCards],
   );
   const totalPages = Math.max(1, Math.ceil(results.length / pageSize));
   const current = Math.min(page, totalPages - 1);
@@ -110,8 +146,11 @@ export function CatalogPanel({
         >
           <button
             type="button"
-            aria-pressed={!filters.category}
-            onClick={() => update("category", "")}
+            aria-pressed={!filters.category && view === "catalog"}
+            onClick={() => {
+              setView("catalog");
+              update("category", "");
+            }}
           >
             All
           </button>
@@ -119,14 +158,83 @@ export function CatalogPanel({
             <button
               type="button"
               key={category}
-              aria-pressed={filters.category === category}
-              onClick={() => update("category", category)}
+              aria-pressed={view === "catalog" && filters.category === category}
+              onClick={() => {
+                setView("catalog");
+                update("category", category);
+              }}
             >
               {category}
             </button>
           ))}
+          <button
+            type="button"
+            aria-pressed={showPlaceholders}
+            title="Stand-ins such as Any card or Any Spell Card"
+            onClick={() => {
+              setView("placeholders");
+              setPage(0);
+            }}
+          >
+            Placeholders
+          </button>
+          <button
+            type="button"
+            aria-pressed={view === "custom"}
+            title="Your own cards for ones missing from the dataset"
+            onClick={() => {
+              setView("custom");
+              setPage(0);
+            }}
+          >
+            Custom
+          </button>
         </div>
-        {filtersOpen && (
+        {showPlaceholders && (
+          <form
+            className="placeholder-maker"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (placeholderArchetype)
+                onCreatePlaceholder(placeholderArchetype);
+            }}
+          >
+            <label>
+              Archetype placeholder
+              <select
+                value={placeholderArchetype}
+                onChange={(event) =>
+                  setPlaceholderArchetype(event.target.value)
+                }
+              >
+                <option value="">Choose an archetype</option>
+                {archetypes.map((archetype) => (
+                  <option key={archetype}>{archetype}</option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="submit"
+              className="subtle-button"
+              disabled={!placeholderArchetype}
+            >
+              Add
+            </button>
+          </form>
+        )}
+        {view === "custom" && (
+          <div className="placeholder-maker">
+            <button
+              type="button"
+              className="subtle-button"
+              onClick={onNewCustom}
+            >
+              <Plus size={15} aria-hidden="true" />
+              New Custom Card
+            </button>
+          </div>
+        )}
+        {filtersOpen && !special && (
           <div className="filter-grid">
             <label>
               Monster type
@@ -234,7 +342,12 @@ export function CatalogPanel({
       {data.status === "ready" && (
         <>
           <p className="results-count" role="status">
-            {results.length.toLocaleString("en")} cards
+            {results.length.toLocaleString("en")}{" "}
+            {view === "placeholders"
+              ? "placeholders"
+              : view === "custom"
+                ? "custom cards"
+                : "cards"}
           </p>
           <div className="card-results" key={current}>
             {pageRows.map((card) => (
@@ -247,7 +360,9 @@ export function CatalogPanel({
             ))}
             {!results.length && (
               <p className="panel-message">
-                No cards match. Adjust your search or filters.
+                {view === "custom" && !cards.length
+                  ? "No custom cards yet. Create one for a card missing from the dataset."
+                  : "No cards match. Adjust your search or filters."}
               </p>
             )}
           </div>

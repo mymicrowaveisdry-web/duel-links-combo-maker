@@ -29,6 +29,7 @@ import type { ActionRequest } from "./components/ActionMenu";
 import { BoardPanel } from "./components/BoardPanel";
 import { BoardSettings } from "./components/BoardSettings";
 import { ComboDetails, CombosDialog } from "./components/CombosDialog";
+import { CustomCardDialog } from "./components/CustomCardDialog";
 import { DeckTools } from "./components/DeckTools";
 import { ExportDialog } from "./components/ExportDialog";
 import { DuelistSummary, SkillDialog } from "./components/Duelist";
@@ -43,6 +44,8 @@ import { CardFace } from "./components/cards";
 import { ArtworkContext, loadArtwork, noArtwork } from "./data/artwork";
 import type { ArtworkLookup } from "./data/artwork";
 import { loadCatalog } from "./data/catalog";
+import { newCustomId } from "./data/custom-cards";
+import { archetypePlaceholder, genericPlaceholders } from "./data/placeholders";
 import type { CardDefinition } from "./data/catalog";
 import { appConfig } from "./config";
 import {
@@ -60,8 +63,11 @@ import {
 import type { BoardAction, Placement, Position, ZoneId } from "./domain/board";
 import type { ActionKind, ComboAction, ComboDocument } from "./domain/combo";
 import {
+  deleteCustomCard,
+  listCustomCards,
   loadDraft,
   saveCombo,
+  saveCustomCard,
   saveDraft,
   storageMessage,
 } from "./persistence/database";
@@ -77,6 +83,7 @@ import {
   moveStep,
   notify,
   record,
+  reviseCard,
   setDuelist,
   setView,
   truncateFrom,
@@ -144,6 +151,18 @@ export default function App() {
   const [playing, setPlaying] = useState<object | null>(null);
   const [confirmReplace, setConfirmReplace] = useState(false);
   const [skillOpen, setSkillOpen] = useState(false);
+  // Opening-hand slot waiting for an alternative card from the browser.
+  const [alternativeFor, setAlternativeFor] = useState<number | null>(null);
+  // Archetype placeholders created in this session.
+  const [madePlaceholders, setMadePlaceholders] = useState<CardDefinition[]>(
+    [],
+  );
+  // The author's custom card library (IndexedDB) and the card open in its editor.
+  const [customLibrary, setCustomLibrary] = useState<CardDefinition[]>([]);
+  const [customEdit, setCustomEdit] = useState<{
+    open: boolean;
+    card?: CardDefinition;
+  }>({ open: false });
   const [exportOpen, setExportOpen] = useState(false);
   const [combosOpen, setCombosOpen] = useState(false);
   const [restored, setRestored] = useState(false);
@@ -180,6 +199,18 @@ export default function App() {
       activationConstraint: { delay: 220, tolerance: 7 },
     }),
   );
+
+  useEffect(() => {
+    let live = true;
+    listCustomCards()
+      .then((cards) => {
+        if (live) setCustomLibrary(cards);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -294,10 +325,32 @@ export default function App() {
         ? catalog.value.cards.map((card) => [card.id, card])
         : [],
     );
-    for (const card of Object.values(doc.cards))
+    // The combo's own snapshots win over the custom library, so the board always
+    // shows the version the combo was recorded with.
+    for (const card of [
+      ...genericPlaceholders,
+      ...madePlaceholders,
+      ...Object.values(doc.cards),
+      ...customLibrary,
+    ])
       if (!map.has(card.id)) map.set(card.id, card);
     return map;
-  }, [catalog, doc.cards]);
+  }, [catalog, doc.cards, madePlaceholders, customLibrary]);
+  // Custom cards from the library plus any that only the open combo carries.
+  const customCards = useMemo(() => {
+    const found = new Map(customLibrary.map((card) => [card.id, card]));
+    for (const card of Object.values(doc.cards))
+      if (card.custom && !found.has(card.id)) found.set(card.id, card);
+    return [...found.values()];
+  }, [customLibrary, doc.cards]);
+  // Archetype placeholders made here or already used in the open combo.
+  const archetypePlaceholders = useMemo(() => {
+    const generic = new Set(genericPlaceholders.map(({ id }) => id));
+    const found = new Map<number, CardDefinition>();
+    for (const card of [...madePlaceholders, ...Object.values(doc.cards)])
+      if (card.placeholder && !generic.has(card.id)) found.set(card.id, card);
+    return [...found.values()];
+  }, [madePlaceholders, doc.cards]);
   const instance =
     selection?.kind === "instance"
       ? board.instances.find(({ id }) => id === selection.instanceId)
@@ -339,7 +392,71 @@ export default function App() {
     changePane("side", focusHeading, next);
   }
 
+  async function saveCustom(card: CardDefinition) {
+    try {
+      await saveCustomCard(card);
+    } catch (error) {
+      dispatch(notify(storageMessage(error)));
+      return;
+    }
+    const existed = customLibrary.some(({ id }) => id === card.id);
+    setCustomLibrary((list) =>
+      [...list.filter(({ id }) => id !== card.id), card].sort((a, b) =>
+        a.name.localeCompare(b.name),
+      ),
+    );
+    setCustomEdit({ open: false });
+    if (doc.cards[String(card.id)]) dispatch(reviseCard(card));
+    else
+      dispatch(
+        inform(
+          `${existed ? "Updated" : "Created"} the custom card ${card.name}.`,
+        ),
+      );
+    if (!customEdit.card) choose({ kind: "catalog", definitionId: card.id });
+  }
+
+  async function removeCustom(card: CardDefinition) {
+    try {
+      await deleteCustomCard(card.id);
+    } catch (error) {
+      dispatch(notify(storageMessage(error)));
+      return;
+    }
+    setCustomLibrary((list) => list.filter(({ id }) => id !== card.id));
+    setCustomEdit({ open: false });
+    dispatch(
+      inform(
+        doc.cards[String(card.id)]
+          ? `Deleted ${card.name} from your library. This combo keeps its copy.`
+          : `Deleted ${card.name} from your library.`,
+      ),
+    );
+  }
+
   function choose(selection: Selection) {
+    if (alternativeFor !== null && selection.kind === "catalog") {
+      const slot = board.instances.find(({ id }) => id === alternativeFor);
+      const pick = library.get(selection.definitionId);
+      if (slot && pick) {
+        const current = (slot.alternatives ?? []).flatMap((id) => {
+          const known = library.get(id);
+          return known ? [known] : [];
+        });
+        dispatch(
+          setupChange({
+            type: "alternatives",
+            id: slot.id,
+            cards: [...current, pick],
+          }),
+        );
+      }
+      setAlternativeFor(null);
+      select({ kind: "instance", instanceId: alternativeFor });
+      showSide("setup", true);
+      return;
+    }
+    setAlternativeFor(null);
     select(selection);
     setPending(null);
     showSide("setup", true);
@@ -486,6 +603,7 @@ export default function App() {
   }
 
   function changeMode(next: Mode) {
+    setAlternativeFor(null);
     setPending(null);
     setRequest(null);
     setPlaying(null);
@@ -686,6 +804,18 @@ export default function App() {
           <main id="workspace" className="workspace" tabIndex={-1}>
             <CatalogPanel
               data={catalog}
+              placeholders={archetypePlaceholders}
+              customCards={customCards}
+              onNewCustom={() => setCustomEdit({ open: true })}
+              onCreatePlaceholder={(archetype) => {
+                const made = archetypePlaceholder(archetype);
+                setMadePlaceholders((list) =>
+                  list.some(({ id }) => id === made.id)
+                    ? list
+                    : [...list, made],
+                );
+                choose({ kind: "catalog", definitionId: made.id });
+              }}
               selectedId={
                 selection?.kind === "catalog"
                   ? selection.definitionId
@@ -856,6 +986,27 @@ export default function App() {
                 }}
                 onCancel={() => setPending(null)}
                 onPose={setPose}
+                alternativePicking={alternativeFor !== null}
+                onAddAlternative={() => {
+                  if (!instance) return;
+                  setAlternativeFor(instance.id);
+                  changePane("catalog", true);
+                }}
+                onRemoveAlternative={(definitionId) => {
+                  if (!instance) return;
+                  dispatch(
+                    setupChange({
+                      type: "alternatives",
+                      id: instance.id,
+                      cards: (instance.alternatives ?? []).flatMap((id) => {
+                        const known = library.get(id);
+                        return known && id !== definitionId ? [known] : [];
+                      }),
+                    }),
+                  );
+                }}
+                onCancelAlternative={() => setAlternativeFor(null)}
+                onEditCustom={(card) => setCustomEdit({ open: true, card })}
                 onRemove={() => {
                   if (!instance) return;
                   if (recording) recordCardAction("remove-card");
@@ -993,6 +1144,14 @@ export default function App() {
         deckAware={Boolean(doc.deckAware)}
         onRecord={recordAction}
         onCancel={() => setRequest(null)}
+      />
+      <CustomCardDialog
+        open={customEdit.open}
+        card={customEdit.card}
+        newId={() => newCustomId((id) => library.has(id))}
+        onSave={(card) => void saveCustom(card)}
+        onDelete={(card) => void removeCustom(card)}
+        onClose={() => setCustomEdit({ open: false })}
       />
       <BoardSettings
         dialog={settingsDialog}

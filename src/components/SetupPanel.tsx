@@ -3,6 +3,7 @@ import {
   ClipboardList,
   Layers2,
   Move,
+  Pencil,
   Plus,
   Trash2,
 } from "lucide-react";
@@ -43,6 +44,11 @@ export function SetupPanel({
   onCancel,
   onPose,
   onRemove,
+  alternativePicking,
+  onAddAlternative,
+  onRemoveAlternative,
+  onCancelAlternative,
+  onEditCustom,
 }: {
   active: boolean;
   mode: Mode;
@@ -65,6 +71,12 @@ export function SetupPanel({
   onCancel: () => void;
   onPose: (position: Position, faceUp: boolean) => void;
   onRemove: () => void;
+  /** Waiting for the author to pick an alternative card in the browser. */
+  alternativePicking: boolean;
+  onAddAlternative: () => void;
+  onRemoveAlternative: (definitionId: number) => void;
+  onCancelAlternative: () => void;
+  onEditCustom: (card: CardDefinition) => void;
 }) {
   const zone = selected?.kind === "zone" ? getZone(selected.zone) : undefined;
   const instanceZone = instance ? getZone(instance.zone) : undefined;
@@ -135,8 +147,23 @@ export function SetupPanel({
                     Copy {instance?.id} · {zoneName(instanceZone)}
                   </small>
                 )}
+                {card.custom && (
+                  <small className="custom-note">
+                    Custom card, not from the dataset
+                  </small>
+                )}
               </div>
             </div>
+            {card.custom && mode !== "replay" && (
+              <button
+                type="button"
+                className="subtle-button"
+                onClick={() => onEditCustom(card)}
+              >
+                <Pencil size={15} aria-hidden="true" />
+                Edit Custom Card
+              </button>
+            )}
             {stats.some(([, value]) => value !== undefined) && (
               <dl className="card-stats">
                 {stats.map(([label, value]) =>
@@ -201,6 +228,52 @@ export function SetupPanel({
                     </li>
                   ))}
                 </ul>
+              </div>
+            )}
+            {setup && instance && instanceZone?.kind === "hand" && (
+              <div className="alternatives">
+                <h4>Alternatives for this slot</h4>
+                {instance.alternatives?.length ? (
+                  <ul>
+                    {instance.alternatives.map((id) => (
+                      <li key={id}>
+                        <span>{library.get(id)?.name ?? "Unknown card"}</span>
+                        <button
+                          type="button"
+                          className="text-button"
+                          onClick={() => onRemoveAlternative(id)}
+                        >
+                          Remove
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="choice-empty">
+                    Add cards that could take this slot, such as another
+                    starter.
+                  </p>
+                )}
+                {alternativePicking ? (
+                  <div className="placement-callout" role="status">
+                    <span>Choose the alternative in the Card Browser.</span>
+                    <button
+                      type="button"
+                      className="text-button"
+                      onClick={onCancelAlternative}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="subtle-button"
+                    onClick={onAddAlternative}
+                  >
+                    Add Alternative
+                  </button>
+                )}
               </div>
             )}
             {card.description && (

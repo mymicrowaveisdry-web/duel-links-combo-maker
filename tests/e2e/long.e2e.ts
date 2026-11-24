@@ -119,6 +119,29 @@ test("handles an 80-step combo without truncating exports", async ({
   ))
     expect(height).toBeLessThanOrEqual(32_000);
 
+  // The horizontal guide is landscape and still splits instead of cropping.
+  await dialog.getByLabel("Layout").selectOption("horizontal");
+  await expect
+    .poll(
+      () =>
+        images
+          .first()
+          .evaluate((img) => (img as HTMLImageElement).naturalWidth),
+      { timeout: 30_000 },
+    )
+    .toBe(3200);
+  const sizes = await images.evaluateAll((list) =>
+    list.map((img) => [
+      (img as HTMLImageElement).naturalWidth,
+      (img as HTMLImageElement).naturalHeight,
+    ]),
+  );
+  expect(sizes.length).toBeGreaterThanOrEqual(1);
+  for (const [imageWidth, imageHeight] of sizes) {
+    expect(imageWidth).toBe(3200);
+    expect(imageWidth! * imageHeight!).toBeLessThanOrEqual(16_000_000);
+  }
+
   test.info().annotations.push({
     type: "timings",
     description: `load ${loadMs} ms, search ${searchMs} ms, import ${importMs} ms, PNG ${renderMs} ms, ${await images.count()} image(s)`,
