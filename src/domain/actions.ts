@@ -230,6 +230,18 @@ export function recordingTargetError(
   return canPlace(board, source, card, destination);
 }
 
+/**
+ * Duplicating is offered only for steps that neither create nor move cards. A copied
+ * summon or search would refer to a card that has already moved.
+ */
+export function canDuplicate(action: ComboAction) {
+  return action.operations.every((operation) =>
+    ["counter", "stat", "marker", "life", "duel", "pose", "control"].includes(
+      operation.op,
+    ),
+  );
+}
+
 /** Cards the summoning side could use as materials, in a stable order. */
 export function materialCandidates(
   board: Board,

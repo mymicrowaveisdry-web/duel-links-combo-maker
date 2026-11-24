@@ -13,7 +13,9 @@ import {
   ClipboardList,
   FilePlus2,
   Layers3,
+  ListOrdered,
   PencilRuler,
+  Play,
   Redo2,
   Swords,
   Undo2,
@@ -23,6 +25,9 @@ import { ActionMenu } from "./components/ActionMenu";
 import type { ActionRequest } from "./components/ActionMenu";
 import { BoardPanel } from "./components/BoardPanel";
 import { BoardSettings } from "./components/BoardSettings";
+import { PlaybackBar, SideTabs, playbackSpeeds } from "./components/Playback";
+import type { PlaybackSpeed } from "./components/Playback";
+import { Timeline } from "./components/Timeline";
 import { CatalogPanel } from "./components/CatalogPanel";
 import type { CatalogState } from "./components/CatalogPanel";
 import { SetupPanel } from "./components/SetupPanel";
@@ -38,9 +43,16 @@ import { canPlace, zones } from "./domain/board";
 import type { BoardAction, Placement, Position, ZoneId } from "./domain/board";
 import type { ActionKind, ComboAction } from "./domain/combo";
 import {
+  armInsert,
   closeGroup,
+  deleteStep,
+  duplicateStep,
+  moveStep,
   notify,
   record,
+  setView,
+  truncateFrom,
+  updateStep,
   redo,
   selectReplay,
   setMode,
@@ -52,12 +64,24 @@ import {
 } from "./store";
 import type { Mode } from "./store";
 
-type Pane = "catalog" | "board" | "setup";
+type Pane = "catalog" | "board" | "side";
+type Side = "timeline" | "setup";
 const panes = [
-  { id: "catalog", label: "Cards", Icon: Layers3 },
-  { id: "board", label: "Board", Icon: Swords },
-  { id: "setup", label: "Details", Icon: ClipboardList },
+  { pane: "catalog", side: null, label: "Cards", Icon: Layers3 },
+  { pane: "board", side: null, label: "Board", Icon: Swords },
+  { pane: "side", side: "timeline", label: "Steps", Icon: ListOrdered },
+  { pane: "side", side: "setup", label: "Details", Icon: ClipboardList },
 ] as const;
+
+const speedKey = "dlcm.playbackSpeed";
+function readSpeed(): PlaybackSpeed {
+  try {
+    const stored = Number(localStorage.getItem(speedKey));
+    return playbackSpeeds.find((speed) => speed === stored) ?? 1;
+  } catch {
+    return 1;
+  }
+}
 
 export default function App() {
   const [catalog, setCatalog] = useState<CatalogState>({ status: "loading" });
@@ -67,19 +91,29 @@ export default function App() {
   const [pending, setPending] = useState<Placement | null>(null);
   const [drag, setDrag] = useState<Placement | null>(null);
   const [pane, setPane] = useState<Pane>("board");
+  const [side, setSide] = useState<Side>("timeline");
+  const [speed, setSpeed] = useState<PlaybackSpeed>(readSpeed);
+  // Playback runs only while this exact document is shown in Replay.
+  const [playing, setPlaying] = useState<object | null>(null);
+  const [confirmReplace, setConfirmReplace] = useState(false);
   const [settingsError, setSettingsError] = useState("");
   const [request, setRequest] = useState<ActionRequest | null>(null);
   const settingsDialog = useRef<HTMLDialogElement>(null);
   const dispatch = useAppDispatch();
-  const { doc, mode, openGroup, past, future, notice } = useAppSelector(
-    (state) => state.combo,
-  );
+  const { doc, mode, openGroup, view, insertArmed, past, future, notice } =
+    useAppSelector((state) => state.combo);
   const replayed = useAppSelector(selectReplay);
-  // Setup edits the starting board. Recording works on the board after the last step.
   const recording = mode === "recording";
-  const board = recording
-    ? (replayed.boards.at(-1) ?? doc.initialBoard)
-    : doc.initialBoard;
+  // Last board that replays. Steps after a failing step have no board.
+  const lastIndex = replayed.boards.length - 1;
+  const viewIndex =
+    mode === "setup" ? 0 : Math.min(view ?? lastIndex, lastIndex);
+  // Setup edits the starting board. Record and Replay show the viewed step.
+  const board =
+    mode === "setup" ? doc.initialBoard : replayed.boards[viewIndex]!;
+  // Recording at an earlier step inserts there once the author chooses to.
+  const behind = recording && view !== null && view < doc.steps.length;
+  const isPlaying = playing === doc && mode === "replay";
   const hasHistory = Boolean(past.length || future.length);
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 7 } }),
@@ -134,6 +168,17 @@ export default function App() {
   }, [dispatch]);
 
   useEffect(() => {
+    if (!isPlaying) return;
+    const timer = window.setTimeout(() => {
+      const next = viewIndex + 1;
+      dispatch(setView(next));
+      // Stop on reaching the final step.
+      if (next >= lastIndex) setPlaying(null);
+    }, 1200 / speed);
+    return () => window.clearTimeout(timer);
+  }, [isPlaying, viewIndex, lastIndex, speed, dispatch]);
+
+  useEffect(() => {
     if (!hasHistory) return;
     function onLeave(event: BeforeUnloadEvent) {
       event.preventDefault();
@@ -180,24 +225,53 @@ export default function App() {
       : canPlace(board, source, card, zone);
   }
 
-  function changePane(next: Pane, focusHeading = false) {
+  function changePane(next: Pane, focusHeading = false, nextSide = side) {
     setPane(next);
     if (focusHeading && window.matchMedia("(max-width: 980px)").matches) {
+      const target = next === "side" ? nextSide : next;
       requestAnimationFrame(() =>
-        document.getElementById(`${next}-title`)?.focus(),
+        document.getElementById(`${target}-title`)?.focus(),
       );
     }
+  }
+
+  function showSide(next: Side, focusHeading = false) {
+    setSide(next);
+    changePane("side", focusHeading, next);
   }
 
   function choose(selection: Selection) {
     select(selection);
     setPending(null);
-    changePane("setup", true);
+    showSide("setup", true);
+  }
+
+  /** Replay is read-only. Recording behind the latest step needs an explicit choice. */
+  function blocked() {
+    if (mode === "replay") {
+      dispatch(
+        notify("Replay is read-only. Switch to Record to change the combo."),
+      );
+      return true;
+    }
+    if (behind && !insertArmed) {
+      dispatch(
+        notify(
+          `You are viewing step ${view}. Choose Insert here, Replace later steps or Return to latest above the board.`,
+        ),
+      );
+      return true;
+    }
+    return false;
   }
 
   function place(source: Placement, destination: ZoneId) {
     const card = resolve(source);
     if (!card) return;
+    if (blocked()) {
+      setPending(null);
+      return;
+    }
     const error = placementError(source, destination);
     if (recording) {
       // While recording, every movement goes through the action menu.
@@ -212,15 +286,45 @@ export default function App() {
   }
 
   function recordAction(action: ComboAction, newCards: CardDefinition[] = []) {
-    dispatch(record(action, newCards));
+    // Read the latest view at dispatch time; it decides between append and insert.
+    const state = store.getState().combo;
+    const at =
+      state.insertArmed &&
+      state.view !== null &&
+      state.view < state.doc.steps.length
+        ? state.view
+        : undefined;
+    dispatch(record(action, newCards, at));
     setRequest(null);
+  }
+
+  function viewStep(index: number) {
+    setPlaying(null);
+    setConfirmReplace(false);
+    if (mode === "setup") dispatch(setMode("replay"));
+    dispatch(setView(index >= doc.steps.length ? null : index));
+  }
+
+  function play() {
+    if (mode !== "replay") dispatch(setMode("replay"));
+    if (viewIndex >= lastIndex) dispatch(setView(0));
+    setPlaying(doc);
+  }
+
+  function changeSpeed(next: PlaybackSpeed) {
+    setSpeed(next);
+    try {
+      localStorage.setItem(speedKey, String(next));
+    } catch {
+      // Preferences are optional.
+    }
   }
 
   function recordCardAction(
     kind: ActionKind,
     options?: Parameters<typeof buildCardAction>[3],
   ) {
-    if (!instance) return;
+    if (!instance || blocked()) return;
     const action = buildCardAction(board, instance.id, kind, options);
     if ("error" in action) return;
     recordAction(action);
@@ -230,6 +334,8 @@ export default function App() {
   function changeMode(next: Mode) {
     setPending(null);
     setRequest(null);
+    setPlaying(null);
+    setConfirmReplace(false);
     select(null);
     dispatch(setMode(next));
   }
@@ -308,7 +414,7 @@ export default function App() {
           <div className="mode-switch" role="group" aria-label="Editing mode">
             <button
               type="button"
-              aria-pressed={!recording}
+              aria-pressed={mode === "setup"}
               onClick={() => changeMode("setup")}
               title="Edit the starting board"
             >
@@ -322,6 +428,14 @@ export default function App() {
               title="Record board changes as combo steps"
             >
               <CircleDot size={15} aria-hidden="true" /> <span>Record</span>
+            </button>
+            <button
+              type="button"
+              aria-pressed={mode === "replay"}
+              onClick={() => changeMode("replay")}
+              title="Step through the combo without changing it"
+            >
+              <Play size={15} aria-hidden="true" /> <span>Replay</span>
             </button>
           </div>
           <button
@@ -370,12 +484,12 @@ export default function App() {
         </div>
       </header>
       <nav className="mobile-nav" aria-label="Workspace panel">
-        {panes.map(({ id, label, Icon }) => (
+        {panes.map(({ pane: id, side: target, label, Icon }) => (
           <button
-            key={id}
+            key={label}
             type="button"
-            aria-pressed={pane === id}
-            onClick={() => changePane(id)}
+            aria-pressed={pane === id && (!target || side === target)}
+            onClick={() => (target ? showSide(target) : changePane(id))}
           >
             <Icon size={17} aria-hidden="true" /> {label}
           </button>
@@ -408,6 +522,73 @@ export default function App() {
             />
             <BoardPanel
               recording={recording}
+              mode={mode}
+              transport={
+                <PlaybackBar
+                  viewIndex={viewIndex}
+                  lastIndex={lastIndex}
+                  totalSteps={doc.steps.length}
+                  playing={isPlaying}
+                  speed={speed}
+                  onView={viewStep}
+                  onPlay={play}
+                  onPause={() => setPlaying(null)}
+                  onSpeed={changeSpeed}
+                />
+              }
+              banner={
+                behind ? (
+                  <div className="view-banner" role="status">
+                    <p>
+                      {insertArmed
+                        ? `Inserting after step ${view}. Later steps are revalidated.`
+                        : `Viewing step ${view} of ${doc.steps.length}. How should new steps be recorded?`}
+                    </p>
+                    <div className="view-banner-actions">
+                      {!insertArmed && (
+                        <button
+                          type="button"
+                          className="subtle-button"
+                          onClick={() => dispatch(armInsert())}
+                        >
+                          Insert here
+                        </button>
+                      )}
+                      {confirmReplace ? (
+                        <button
+                          type="button"
+                          className="remove-button"
+                          onClick={() => {
+                            setConfirmReplace(false);
+                            dispatch(truncateFrom(view!));
+                          }}
+                        >
+                          Confirm: delete {doc.steps.length - view!} later step
+                          {doc.steps.length - view! === 1 ? "" : "s"}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="subtle-button"
+                          onClick={() => setConfirmReplace(true)}
+                        >
+                          Replace later steps
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="text-button"
+                        onClick={() => {
+                          setConfirmReplace(false);
+                          dispatch(setView(null));
+                        }}
+                      >
+                        Return to latest
+                      </button>
+                    </div>
+                  </div>
+                ) : null
+              }
               board={board}
               library={library}
               active={pane === "board"}
@@ -424,35 +605,53 @@ export default function App() {
                 settingsDialog.current?.showModal();
               }}
             />
-            <SetupPanel
-              active={pane === "setup"}
-              mode={mode}
-              doc={doc}
-              replayed={replayed}
-              onRecordCard={recordCardAction}
-              board={board}
-              selected={selection}
-              card={selectedCard}
-              instance={instance}
-              pending={pending}
-              library={library}
-              placementError={placementError}
-              onSelect={choose}
-              onPlace={place}
-              onPick={(source) => {
-                setPending(source);
-                changePane("board", true);
-              }}
-              onCancel={() => setPending(null)}
-              onPose={setPose}
-              onRemove={() => {
-                if (!instance) return;
-                if (recording) recordCardAction("remove-card");
-                else dispatch(setupChange({ type: "remove", id: instance.id }));
-                select(null);
-                setPending(null);
-              }}
-            />
+            {side === "timeline" ? (
+              <Timeline
+                active={pane === "side"}
+                tabs={<SideTabs side={side} onChange={setSide} />}
+                doc={doc}
+                replayed={replayed}
+                viewIndex={viewIndex}
+                handlers={{
+                  onView: viewStep,
+                  onUpdate: (value) => dispatch(updateStep(value)),
+                  onDelete: (id) => dispatch(deleteStep(id)),
+                  onDuplicate: (id) => dispatch(duplicateStep({ id })),
+                  onMove: (id, delta) => dispatch(moveStep({ id, delta })),
+                  onTruncate: (index) => dispatch(truncateFrom(index)),
+                }}
+              />
+            ) : (
+              <SetupPanel
+                active={pane === "side"}
+                mode={mode}
+                tabs={<SideTabs side={side} onChange={setSide} />}
+                onRecordCard={recordCardAction}
+                board={board}
+                selected={selection}
+                card={selectedCard}
+                instance={instance}
+                pending={pending}
+                library={library}
+                placementError={placementError}
+                onSelect={choose}
+                onPlace={place}
+                onPick={(source) => {
+                  setPending(source);
+                  changePane("board", true);
+                }}
+                onCancel={() => setPending(null)}
+                onPose={setPose}
+                onRemove={() => {
+                  if (!instance) return;
+                  if (recording) recordCardAction("remove-card");
+                  else
+                    dispatch(setupChange({ type: "remove", id: instance.id }));
+                  select(null);
+                  setPending(null);
+                }}
+              />
+            )}
           </main>
           <DragOverlay dropAnimation={null}>
             {draggedCard && (
@@ -465,14 +664,18 @@ export default function App() {
       </ArtworkContext.Provider>
       <footer className="app-footer">
         <span className={`setup-state ${recording ? "is-recording" : ""}`}>
-          {recording ? (
+          {mode === "replay" ? (
+            <Play size={15} aria-hidden="true" />
+          ) : recording ? (
             <CircleDot size={15} aria-hidden="true" />
           ) : (
             <PencilRuler size={15} aria-hidden="true" />
           )}{" "}
-          {recording
-            ? `Recording · ${doc.steps.length} step${doc.steps.length === 1 ? "" : "s"}`
-            : "Setup Mode"}
+          {mode === "replay"
+            ? `Replay · ${viewIndex === 0 ? "start" : `step ${viewIndex}`} of ${doc.steps.length}`
+            : recording
+              ? `Recording · ${doc.steps.length} step${doc.steps.length === 1 ? "" : "s"}`
+              : "Setup Mode"}
           {recording && openGroup && (
             <button
               type="button"

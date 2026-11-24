@@ -7,10 +7,10 @@ import {
   Trash2,
 } from "lucide-react";
 import type { CardDefinition } from "../data/catalog";
-import { describeAction } from "../domain/actions";
 import type { buildCardAction } from "../domain/actions";
 import { cardsIn, getZone, materialsOf, zoneName } from "../domain/board";
-import type { ActionKind, ComboDocument, ReplayResult } from "../domain/combo";
+import type { ActionKind } from "../domain/combo";
+import type { ReactNode } from "react";
 import type { Mode } from "../store";
 import { CardActions } from "./CardActions";
 import type {
@@ -27,8 +27,7 @@ export type Selection = Placement | { kind: "zone"; zone: ZoneId };
 export function SetupPanel({
   active,
   mode,
-  doc,
-  replayed,
+  tabs,
   onRecordCard,
   board,
   selected,
@@ -46,8 +45,7 @@ export function SetupPanel({
 }: {
   active: boolean;
   mode: Mode;
-  doc: ComboDocument;
-  replayed: ReplayResult;
+  tabs: ReactNode;
   onRecordCard: (
     kind: ActionKind,
     options?: Parameters<typeof buildCardAction>[3],
@@ -76,6 +74,7 @@ export function SetupPanel({
     instanceZone?.kind === "monster" || instanceZone?.kind === "extra-monster";
   const link = card?.kinds.includes("Link");
   const recording = mode === "recording";
+  const setup = mode === "setup";
   const materials = instance ? materialsOf(board, instance.id) : [];
   const stats = card
     ? ([
@@ -95,9 +94,10 @@ export function SetupPanel({
 
   return (
     <aside
-      className={`panel setup-panel ${active ? "mobile-active" : ""}`}
+      className={`panel side-panel setup-panel ${active ? "mobile-active" : ""}`}
       aria-labelledby="setup-title"
     >
+      {tabs}
       <div className="panel-heading">
         <h2 id="setup-title" tabIndex={-1}>
           {card ? "Card Details" : zone ? "Zone Details" : "Setup"}
@@ -259,7 +259,7 @@ export function SetupPanel({
                   onRecord={onRecordCard}
                 />
               )}
-              {!recording &&
+              {setup &&
                 instanceZone?.single &&
                 instance &&
                 !(monsterSlot && link) && (
@@ -291,7 +291,7 @@ export function SetupPanel({
                     )}
                   </div>
                 )}
-              {instance && (
+              {instance && mode !== "replay" && (
                 <button
                   type="button"
                   className="remove-button"
@@ -335,7 +335,6 @@ export function SetupPanel({
             <p>Select a card to view its details or drag it onto the field.</p>
           </div>
         )}
-        <RecordedSteps doc={doc} replayed={replayed} />
         <div className="setup-summary">
           <h3>Starting State</h3>
           {summary.map(([id, label]) => (
@@ -352,51 +351,5 @@ export function SetupPanel({
         </div>
       </div>
     </aside>
-  );
-}
-
-/** Read-only list of recorded steps. Editing and playback arrive with the timeline. */
-function RecordedSteps({
-  doc,
-  replayed,
-}: {
-  doc: ComboDocument;
-  replayed: ReplayResult;
-}) {
-  if (!doc.steps.length) return null;
-  const failure = replayed.failure;
-  return (
-    <section className="recorded-steps" aria-labelledby="recorded-steps-title">
-      <h3 id="recorded-steps-title">Recorded Steps</h3>
-      {failure && (
-        <p className="form-error" role="alert">
-          {failure.index < 0
-            ? failure.message
-            : `Step ${failure.index + 1} no longer applies: ${failure.message}`}
-        </p>
-      )}
-      <ol>
-        {doc.steps.map((step, index) => {
-          const before = replayed.boards[index];
-          const text =
-            step.customDescription ??
-            (before
-              ? describeAction(step.action, before, doc.cards)
-              : "Not replayed.");
-          const member = step.groupId && step.groupId !== step.id;
-          return (
-            <li
-              key={step.id}
-              className={`${member ? "in-group" : ""} ${before ? "" : "stale"}`}
-            >
-              <span className="step-number">
-                {String(index + 1).padStart(2, "0")}
-              </span>
-              <span>{text}</span>
-            </li>
-          );
-        })}
-      </ol>
-    </section>
   );
 }

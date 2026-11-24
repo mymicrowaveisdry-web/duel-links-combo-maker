@@ -36,6 +36,11 @@ export interface BoardPanelProps {
   onSettings: () => void;
   /** While recording, the hand shows the current hand rather than the opening hand. */
   recording: boolean;
+  mode: "setup" | "recording" | "replay";
+  /** Playback controls shown in the board heading. */
+  transport: ReactNode;
+  /** Status shown above the mat, such as recording behind the latest step. */
+  banner: ReactNode;
 }
 
 const zoneIcons: Partial<Record<Zone["kind"], typeof Triangle>> = {
@@ -237,10 +242,10 @@ function Hand({ props }: { props: BoardPanelProps }) {
           aria-label="Player Hand"
         >
           <Layers2 size={17} aria-hidden="true" />{" "}
-          {props.recording ? "Hand" : "Opening Hand"}
+          {props.mode === "setup" ? "Opening Hand" : "Hand"}
         </button>
         <span>
-          {props.recording
+          {props.mode !== "setup"
             ? `${hand.length} card${hand.length === 1 ? "" : "s"}`
             : `${hand.length} / ${board.handSize} cards`}
         </span>
@@ -263,9 +268,10 @@ function Hand({ props }: { props: BoardPanelProps }) {
         })}
         {Array.from(
           {
-            length: props.recording
-              ? 0
-              : Math.max(0, Math.min(6, board.handSize - hand.length)),
+            length:
+              props.mode !== "setup"
+                ? 0
+                : Math.max(0, Math.min(6, board.handSize - hand.length)),
           },
           (_, index) => (
             <span className="hand-empty" aria-hidden="true" key={index}>
@@ -283,7 +289,7 @@ function Hand({ props }: { props: BoardPanelProps }) {
 
 export function BoardPanel(props: BoardPanelProps) {
   const [opponentVisible, setOpponentVisible] = useState(true);
-  const { active, board, onSettings } = props;
+  const { active, board, onSettings, transport, banner } = props;
   // Visible mat rows, so the card size can fit the whole mat in the viewport.
   const rows =
     3 +
@@ -311,6 +317,7 @@ export function BoardPanel(props: BoardPanelProps) {
             </p>
           </div>
         </div>
+        {transport}
         <div className="board-heading-controls">
           <button
             type="button"
@@ -335,6 +342,7 @@ export function BoardPanel(props: BoardPanelProps) {
           </button>
         </div>
       </div>
+      {banner}
       <div className="playmat" style={{ "--rows": rows } as CSSProperties}>
         {opponentVisible && (
           <SeatCaption side="opponent" board={board}>

@@ -128,11 +128,20 @@ function FrontFace({
   );
 }
 
-function CatalogThumb({ card }: { card: CardDefinition }) {
+/** Small decorative card thumbnail. Pass a title to name it on hover. */
+export function CardThumb({
+  card,
+  title,
+}: {
+  card: CardDefinition;
+  title?: string;
+}) {
   const image = useCardImage(card);
   return (
     <span
       className={`catalog-thumb tone-${cardStyle(card)} ${image.src ? "has-image" : ""}`}
+      title={title}
+      aria-hidden="true"
     >
       {image.src ? (
         <CardImage src={image.src} onError={image.onError} />
@@ -167,7 +176,7 @@ export function CatalogRow({
       onClick={onSelect}
       {...listeners}
     >
-      <CatalogThumb card={card} />
+      <CardThumb card={card} />
       <span className="catalog-card-text">
         <strong>{card.name}</strong>
         <small>{card.type}</small>
