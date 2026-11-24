@@ -128,11 +128,20 @@ function FrontFace({
   );
 }
 
-function CatalogThumb({ card }: { card: CardDefinition }) {
+/** Small decorative card thumbnail. Pass a title to name it on hover. */
+export function CardThumb({
+  card,
+  title,
+}: {
+  card: CardDefinition;
+  title?: string;
+}) {
   const image = useCardImage(card);
   return (
     <span
       className={`catalog-thumb tone-${cardStyle(card)} ${image.src ? "has-image" : ""}`}
+      title={title}
+      aria-hidden="true"
     >
       {image.src ? (
         <CardImage src={image.src} onError={image.onError} />
@@ -167,7 +176,7 @@ export function CatalogRow({
       onClick={onSelect}
       {...listeners}
     >
-      <CatalogThumb card={card} />
+      <CardThumb card={card} />
       <span className="catalog-card-text">
         <strong>{card.name}</strong>
         <small>{card.type}</small>
@@ -183,12 +192,14 @@ export function BoardCard({
   selected,
   onSelect,
   compact = false,
+  materials = 0,
 }: {
   card: CardDefinition;
   instance: CardInstance;
   selected: boolean;
   onSelect: () => void;
   compact?: boolean;
+  materials?: number;
 }) {
   const source: Placement = { kind: "instance", instanceId: instance.id };
   const { setNodeRef, isDragging, listeners } = useDraggable({
@@ -202,12 +213,17 @@ export function BoardCard({
       ref={setNodeRef}
       className={`board-card ${compact ? "compact-card" : ""} ${isDragging ? "dragging" : ""}`}
       aria-pressed={selected}
-      aria-label={`${card.name}, copy ${instance.id}, ${pose}`}
+      aria-label={`${card.name}, copy ${instance.id}, ${pose}${materials ? `, ${materials} Xyz material${materials === 1 ? "" : "s"}` : ""}`}
       title={`${card.name} · ${pose}`}
       onClick={onSelect}
       {...listeners}
     >
       <CardFace card={card} instance={instance} />
+      {materials > 0 && (
+        <span className="material-badge" aria-hidden="true">
+          {materials}
+        </span>
+      )}
     </button>
   );
 }

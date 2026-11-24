@@ -9,17 +9,32 @@ import {
 } from "@dnd-kit/core";
 import type { DragEndEvent, DragStartEvent } from "@dnd-kit/core";
 import {
-  Check,
+  CircleDot,
   ClipboardList,
+  Download,
+  FilePlus2,
+  FolderOpen,
   Layers3,
+  ListOrdered,
+  PencilRuler,
+  Play,
   Redo2,
-  RotateCcw,
+  Save,
   Swords,
   Undo2,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ActionMenu } from "./components/ActionMenu";
+import type { ActionRequest } from "./components/ActionMenu";
 import { BoardPanel } from "./components/BoardPanel";
 import { BoardSettings } from "./components/BoardSettings";
+import { ComboDetails, CombosDialog } from "./components/CombosDialog";
+import { DeckTools } from "./components/DeckTools";
+import { ExportDialog } from "./components/ExportDialog";
+import { DuelistSummary, SkillDialog } from "./components/Duelist";
+import { PlaybackBar, SideTabs, playbackSpeeds } from "./components/Playback";
+import type { PlaybackSpeed } from "./components/Playback";
+import { Timeline } from "./components/Timeline";
 import { CatalogPanel } from "./components/CatalogPanel";
 import type { CatalogState } from "./components/CatalogPanel";
 import { SetupPanel } from "./components/SetupPanel";
@@ -30,23 +45,90 @@ import type { ArtworkLookup } from "./data/artwork";
 import { loadCatalog } from "./data/catalog";
 import type { CardDefinition } from "./data/catalog";
 import { appConfig } from "./config";
-import { canPlace, zones } from "./domain/board";
-import type { BoardAction, Placement, Position, ZoneId } from "./domain/board";
 import {
-  execute,
+  buildCardAction,
+  buildDuelAction,
+  recordingTargetError,
+} from "./domain/actions";
+import { canPlace, cardsIn, zones } from "./domain/board";
+import {
+  deckWarnings,
+  maximumYdkBytes,
+  parseYdk,
+  resolveYdk,
+} from "./domain/deck";
+import type { BoardAction, Placement, Position, ZoneId } from "./domain/board";
+import type { ActionKind, ComboAction, ComboDocument } from "./domain/combo";
+import {
+  loadDraft,
+  saveCombo,
+  saveDraft,
+  storageMessage,
+} from "./persistence/database";
+import {
+  armInsert,
+  closeGroup,
+  deleteStep,
+  inform,
+  loadDocument,
+  setDeckAware,
+  setDetails,
+  duplicateStep,
+  moveStep,
+  notify,
+  record,
+  setDuelist,
+  setView,
+  truncateFrom,
+  updateStep,
   redo,
+  selectReplay,
+  setMode,
+  setupChange,
   store,
   undo,
   useAppDispatch,
   useAppSelector,
 } from "./store";
+import type { Mode } from "./store";
 
-type Pane = "catalog" | "board" | "setup";
+type Pane = "catalog" | "board" | "side";
+type Side = "timeline" | "setup";
 const panes = [
-  { id: "catalog", label: "Cards", Icon: Layers3 },
-  { id: "board", label: "Board", Icon: Swords },
-  { id: "setup", label: "Details", Icon: ClipboardList },
+  { pane: "catalog", side: null, label: "Cards", Icon: Layers3 },
+  { pane: "board", side: null, label: "Board", Icon: Swords },
+  { pane: "side", side: "timeline", label: "Steps", Icon: ListOrdered },
+  { pane: "side", side: "setup", label: "Details", Icon: ClipboardList },
 ] as const;
+
+/** Whether a document holds anything worth saving or recovering. */
+function hasContent(doc: ComboDocument) {
+  return Boolean(
+    doc.steps.length ||
+    doc.initialBoard.instances.length ||
+    doc.title !== "Untitled combo" ||
+    doc.description ||
+    doc.skill ||
+    doc.character,
+  );
+}
+
+type SaveState =
+  | { kind: "idle" }
+  | { kind: "saved"; at: string }
+  | { kind: "error"; message: string };
+
+const timeFormat = new Intl.DateTimeFormat(undefined, { timeStyle: "short" });
+
+const speedKey = "dlcm.playbackSpeed";
+function readSpeed(): PlaybackSpeed {
+  try {
+    const stored = Number(localStorage.getItem(speedKey));
+    return playbackSpeeds.find((speed) => speed === stored) ?? 1;
+  } catch {
+    return 1;
+  }
+}
 
 export default function App() {
   const [catalog, setCatalog] = useState<CatalogState>({ status: "loading" });
@@ -56,13 +138,42 @@ export default function App() {
   const [pending, setPending] = useState<Placement | null>(null);
   const [drag, setDrag] = useState<Placement | null>(null);
   const [pane, setPane] = useState<Pane>("board");
+  const [side, setSide] = useState<Side>("timeline");
+  const [speed, setSpeed] = useState<PlaybackSpeed>(readSpeed);
+  // Playback runs only while this exact document is shown in Replay.
+  const [playing, setPlaying] = useState<object | null>(null);
+  const [confirmReplace, setConfirmReplace] = useState(false);
+  const [skillOpen, setSkillOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [combosOpen, setCombosOpen] = useState(false);
+  const [restored, setRestored] = useState(false);
+  const [saveState, setSaveState] = useState<SaveState>({ kind: "idle" });
+  const [lastSaved, setLastSaved] = useState<{
+    id: string;
+    updatedAt: string;
+  } | null>(null);
   const [settingsError, setSettingsError] = useState("");
+  const [request, setRequest] = useState<ActionRequest | null>(null);
   const settingsDialog = useRef<HTMLDialogElement>(null);
   const dispatch = useAppDispatch();
-  const { board, past, future, notice } = useAppSelector(
-    (state) => state.setup,
-  );
+  const { doc, mode, openGroup, view, insertArmed, past, future, notice } =
+    useAppSelector((state) => state.combo);
+  const replayed = useAppSelector(selectReplay);
+  const recording = mode === "recording";
+  // Last board that replays. Steps after a failing step have no board.
+  const lastIndex = replayed.boards.length - 1;
+  const viewIndex =
+    mode === "setup" ? 0 : Math.min(view ?? lastIndex, lastIndex);
+  // Setup edits the starting board. Record and Replay show the viewed step.
+  const board =
+    mode === "setup" ? doc.initialBoard : replayed.boards[viewIndex]!;
+  // Recording at an earlier step inserts there once the author chooses to.
+  const behind = recording && view !== null && view < doc.steps.length;
+  const isPlaying = playing === doc && mode === "replay";
   const hasHistory = Boolean(past.length || future.length);
+  const dirty =
+    hasContent(doc) &&
+    !(lastSaved?.id === doc.id && lastSaved.updatedAt === doc.updatedAt);
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 7 } }),
     useSensor(TouchSensor, {
@@ -95,7 +206,7 @@ export default function App() {
       if (
         !(event.ctrlKey || event.metaKey) ||
         event.altKey ||
-        settingsDialog.current?.open
+        document.querySelector("dialog[open]")
       )
         return;
       if (
@@ -116,24 +227,77 @@ export default function App() {
   }, [dispatch]);
 
   useEffect(() => {
-    if (!hasHistory) return;
+    if (!isPlaying) return;
+    const timer = window.setTimeout(() => {
+      const next = viewIndex + 1;
+      dispatch(setView(next));
+      // Stop on reaching the final step.
+      if (next >= lastIndex) setPlaying(null);
+    }, 1200 / speed);
+    return () => window.clearTimeout(timer);
+  }, [isPlaying, viewIndex, lastIndex, speed, dispatch]);
+
+  // Recover the autosaved draft once, unless work has already started.
+  useEffect(() => {
+    let live = true;
+    loadDraft()
+      .then((draft) => {
+        if (!live || !draft || !hasContent(draft)) return;
+        if (hasContent(store.getState().combo.doc)) return;
+        dispatch(
+          loadDocument({
+            doc: draft,
+            message: "Recovered your last session from this browser.",
+          }),
+        );
+      })
+      .catch((error: unknown) => {
+        if (live)
+          setSaveState({ kind: "error", message: storageMessage(error) });
+      })
+      .finally(() => live && setRestored(true));
+    return () => {
+      live = false;
+    };
+  }, [dispatch]);
+
+  // Autosave a draft shortly after each change, after recovery has run.
+  useEffect(() => {
+    if (!restored) return;
+    const timer = window.setTimeout(() => {
+      const at = new Date().toISOString();
+      saveDraft(doc, at)
+        .then(() => setSaveState({ kind: "saved", at }))
+        .catch((error: unknown) =>
+          setSaveState({ kind: "error", message: storageMessage(error) }),
+        );
+    }, 700);
+    return () => window.clearTimeout(timer);
+  }, [doc, restored]);
+
+  // Warn before leaving only when the draft could not be stored.
+  const unsafe = saveState.kind === "error" && hasContent(doc);
+  useEffect(() => {
+    if (!unsafe) return;
     function onLeave(event: BeforeUnloadEvent) {
       event.preventDefault();
       event.returnValue = "";
     }
     window.addEventListener("beforeunload", onLeave);
     return () => window.removeEventListener("beforeunload", onLeave);
-  }, [hasHistory]);
+  }, [unsafe]);
 
-  const library = useMemo(
-    () =>
-      new Map(
-        catalog.status === "ready"
-          ? catalog.value.cards.map((card) => [card.id, card])
-          : [],
-      ),
-    [catalog],
-  );
+  // Catalog cards plus the snapshots saved in the combo, so recorded cards always resolve.
+  const library = useMemo(() => {
+    const map = new Map<number, CardDefinition>(
+      catalog.status === "ready"
+        ? catalog.value.cards.map((card) => [card.id, card])
+        : [],
+    );
+    for (const card of Object.values(doc.cards))
+      if (!map.has(card.id)) map.set(card.id, card);
+    return map;
+  }, [catalog, doc.cards]);
   const instance =
     selection?.kind === "instance"
       ? board.instances.find(({ id }) => id === selection.instanceId)
@@ -154,32 +318,180 @@ export default function App() {
 
   function placementError(source: Placement, zone: ZoneId) {
     const card = resolve(source);
-    return card
-      ? canPlace(board, source, card, zone)
-      : "The selected card is unavailable.";
+    if (!card) return "The selected card is unavailable.";
+    return recording
+      ? recordingTargetError(board, source, card, zone, doc.cards)
+      : canPlace(board, source, card, zone);
   }
 
-  function changePane(next: Pane, focusHeading = false) {
+  function changePane(next: Pane, focusHeading = false, nextSide = side) {
     setPane(next);
     if (focusHeading && window.matchMedia("(max-width: 980px)").matches) {
+      const target = next === "side" ? nextSide : next;
       requestAnimationFrame(() =>
-        document.getElementById(`${next}-title`)?.focus(),
+        document.getElementById(`${target}-title`)?.focus(),
       );
     }
+  }
+
+  function showSide(next: Side, focusHeading = false) {
+    setSide(next);
+    changePane("side", focusHeading, next);
   }
 
   function choose(selection: Selection) {
     select(selection);
     setPending(null);
-    changePane("setup", true);
+    showSide("setup", true);
+  }
+
+  /** Replay is read-only. Recording behind the latest step needs an explicit choice. */
+  function blocked() {
+    if (mode === "replay") {
+      dispatch(
+        notify("Replay is read-only. Switch to Record to change the combo."),
+      );
+      return true;
+    }
+    if (behind && !insertArmed) {
+      dispatch(
+        notify(
+          `You are viewing step ${view}. Choose Insert here, Replace later steps or Return to latest above the board.`,
+        ),
+      );
+      return true;
+    }
+    return false;
   }
 
   function place(source: Placement, destination: ZoneId) {
     const card = resolve(source);
     if (!card) return;
-    const valid = !canPlace(board, source, card, destination);
-    dispatch(execute({ type: "place", source, card, destination }));
-    if (valid) setPending(null);
+    if (blocked()) {
+      setPending(null);
+      return;
+    }
+    const error = placementError(source, destination);
+    if (recording) {
+      // While recording, every movement goes through the action menu.
+      if (!error) {
+        setRequest({ source, card, destination });
+        setPending(null);
+      } else dispatch(notify(error));
+      return;
+    }
+    dispatch(setupChange({ type: "place", source, card, destination }));
+    if (!error) setPending(null);
+  }
+
+  function recordAction(action: ComboAction, newCards: CardDefinition[] = []) {
+    // Read the latest view at dispatch time; it decides between append and insert.
+    const state = store.getState().combo;
+    const at =
+      state.insertArmed &&
+      state.view !== null &&
+      state.view < state.doc.steps.length
+        ? state.view
+        : undefined;
+    dispatch(record(action, newCards, at));
+    setRequest(null);
+  }
+
+  /** Records the Skill as it reads now. Following steps group under it. */
+  function activateSkill() {
+    if (blocked()) return;
+    recordAction(
+      buildDuelAction(board, "activate-skill", {
+        skill: doc.skill ?? {
+          name: "Unspecified Skill",
+          origin: "unspecified",
+        },
+      }),
+    );
+  }
+
+  function quickSave() {
+    const saving = doc;
+    saveCombo(saving, new Date().toISOString())
+      .then(() => {
+        setLastSaved({ id: saving.id, updatedAt: saving.updatedAt });
+        dispatch(inform(`Saved ${saving.title} in this browser.`));
+      })
+      .catch((error: unknown) => dispatch(notify(storageMessage(error))));
+  }
+
+  function openDocument(next: ComboDocument, message: string) {
+    setPlaying(null);
+    setPending(null);
+    setRequest(null);
+    select(null);
+    dispatch(loadDocument({ doc: next, message }));
+    setLastSaved({ id: next.id, updatedAt: next.updatedAt });
+  }
+
+  async function importYdk(file: File) {
+    if (file.size > maximumYdkBytes) {
+      dispatch(notify("The deck file is too large."));
+      return;
+    }
+    const parsed = parseYdk(await file.text());
+    if ("error" in parsed) {
+      dispatch(notify(`Deck import failed. ${parsed.error}`));
+      return;
+    }
+    const deck = resolveYdk(parsed, (id) => library.get(id));
+    dispatch(
+      setupChange({ type: "load-deck", main: deck.main, extra: deck.extra }),
+    );
+    const result = store.getState().combo.notice;
+    if (!result?.error && deck.missing.length)
+      dispatch(
+        inform(
+          `${result?.message ?? "Deck loaded."} ${deck.missing.length} card ID${deck.missing.length === 1 ? " was" : "s were"} not in the catalog and skipped.`,
+        ),
+      );
+  }
+
+  function viewStep(index: number) {
+    setPlaying(null);
+    setConfirmReplace(false);
+    if (mode === "setup") dispatch(setMode("replay"));
+    dispatch(setView(index >= doc.steps.length ? null : index));
+  }
+
+  function play() {
+    if (mode !== "replay") dispatch(setMode("replay"));
+    if (viewIndex >= lastIndex) dispatch(setView(0));
+    setPlaying(doc);
+  }
+
+  function changeSpeed(next: PlaybackSpeed) {
+    setSpeed(next);
+    try {
+      localStorage.setItem(speedKey, String(next));
+    } catch {
+      // Preferences are optional.
+    }
+  }
+
+  function recordCardAction(
+    kind: ActionKind,
+    options?: Parameters<typeof buildCardAction>[3],
+  ) {
+    if (!instance || blocked()) return;
+    const action = buildCardAction(board, instance.id, kind, options);
+    if ("error" in action) return;
+    recordAction(action);
+    if (kind === "remove-card") select(null);
+  }
+
+  function changeMode(next: Mode) {
+    setPending(null);
+    setRequest(null);
+    setPlaying(null);
+    setConfirmReplace(false);
+    select(null);
+    dispatch(setMode(next));
   }
 
   function chooseZone(zone: ZoneId, instanceId?: number) {
@@ -210,7 +522,7 @@ export default function App() {
   function setPose(position: Position, faceUp: boolean) {
     if (instance && selectedCard)
       dispatch(
-        execute({
+        setupChange({
           type: "pose",
           id: instance.id,
           card: selectedCard,
@@ -221,8 +533,8 @@ export default function App() {
   }
 
   function applySettings(action: BoardAction) {
-    dispatch(execute(action));
-    const result = store.getState().setup.notice;
+    dispatch(setupChange(action));
+    const result = store.getState().combo.notice;
     if (result?.error) setSettingsError(result.message);
     else settingsDialog.current?.close();
   }
@@ -253,23 +565,77 @@ export default function App() {
           </div>
         </div>
         <div className="header-controls">
+          <div className="mode-switch" role="group" aria-label="Editing mode">
+            <button
+              type="button"
+              aria-pressed={mode === "setup"}
+              onClick={() => changeMode("setup")}
+              title="Edit the starting board"
+            >
+              <PencilRuler size={15} aria-hidden="true" /> <span>Setup</span>
+            </button>
+            <button
+              type="button"
+              aria-pressed={recording}
+              className="record-mode"
+              onClick={() => changeMode("recording")}
+              title="Record board changes as combo steps"
+            >
+              <CircleDot size={15} aria-hidden="true" /> <span>Record</span>
+            </button>
+            <button
+              type="button"
+              aria-pressed={mode === "replay"}
+              onClick={() => changeMode("replay")}
+              title="Step through the combo without changing it"
+            >
+              <Play size={15} aria-hidden="true" /> <span>Replay</span>
+            </button>
+          </div>
           <button
             type="button"
             className="subtle-button reset-button"
-            disabled={!hasHistory}
+            disabled={!hasHistory && !hasContent(doc)}
+            title="Start a new combo. Undo restores the previous one."
             onClick={() => {
               select(null);
               setPending(null);
-              dispatch(execute({ type: "reset" }));
+              dispatch(setupChange({ type: "reset" }));
             }}
           >
-            <RotateCcw size={16} aria-hidden="true" /> <span>Clear Board</span>
+            <FilePlus2 size={16} aria-hidden="true" /> <span>New Combo</span>
           </button>
+          <div className="file-buttons">
+            <button
+              type="button"
+              className="subtle-button header-action"
+              onClick={() => setCombosOpen(true)}
+              title="Open, manage and import combos"
+            >
+              <FolderOpen size={16} aria-hidden="true" /> <span>Open</span>
+            </button>
+            <button
+              type="button"
+              className="subtle-button header-action"
+              onClick={quickSave}
+              title="Save this combo in this browser"
+            >
+              <Save size={16} aria-hidden="true" /> <span>Save</span>
+            </button>
+            <button
+              type="button"
+              className="primary-button header-action"
+              onClick={() => setExportOpen(true)}
+              title="Export PNG, text or JSON"
+            >
+              <Download size={16} aria-hidden="true" /> <span>Export</span>
+            </button>
+          </div>
           <div className="history-buttons">
             <button
               type="button"
               className="icon-button"
-              aria-label="Undo setup change"
+              aria-label="Undo"
               title="Undo (Ctrl/⌘+Z)"
               disabled={!past.length}
               onClick={() => {
@@ -283,7 +649,7 @@ export default function App() {
             <button
               type="button"
               className="icon-button"
-              aria-label="Redo setup change"
+              aria-label="Redo"
               title="Redo (Ctrl/⌘+Shift+Z)"
               disabled={!future.length}
               onClick={() => {
@@ -298,12 +664,12 @@ export default function App() {
         </div>
       </header>
       <nav className="mobile-nav" aria-label="Workspace panel">
-        {panes.map(({ id, label, Icon }) => (
+        {panes.map(({ pane: id, side: target, label, Icon }) => (
           <button
-            key={id}
+            key={label}
             type="button"
-            aria-pressed={pane === id}
-            onClick={() => changePane(id)}
+            aria-pressed={pane === id && (!target || side === target)}
+            onClick={() => (target ? showSide(target) : changePane(id))}
           >
             <Icon size={17} aria-hidden="true" /> {label}
           </button>
@@ -335,6 +701,84 @@ export default function App() {
               active={pane === "catalog"}
             />
             <BoardPanel
+              recording={recording}
+              duelist={
+                <DuelistSummary
+                  character={doc.character}
+                  skill={doc.skill}
+                  canEdit={mode !== "replay"}
+                  canActivate={recording}
+                  onEdit={() => setSkillOpen(true)}
+                  onActivate={activateSkill}
+                />
+              }
+              mode={mode}
+              transport={
+                <PlaybackBar
+                  viewIndex={viewIndex}
+                  lastIndex={lastIndex}
+                  totalSteps={doc.steps.length}
+                  playing={isPlaying}
+                  speed={speed}
+                  onView={viewStep}
+                  onPlay={play}
+                  onPause={() => setPlaying(null)}
+                  onSpeed={changeSpeed}
+                />
+              }
+              banner={
+                behind ? (
+                  <div className="view-banner" role="status">
+                    <p>
+                      {insertArmed
+                        ? `Inserting after step ${view}. Later steps are revalidated.`
+                        : `Viewing step ${view} of ${doc.steps.length}. How should new steps be recorded?`}
+                    </p>
+                    <div className="view-banner-actions">
+                      {!insertArmed && (
+                        <button
+                          type="button"
+                          className="subtle-button"
+                          onClick={() => dispatch(armInsert())}
+                        >
+                          Insert here
+                        </button>
+                      )}
+                      {confirmReplace ? (
+                        <button
+                          type="button"
+                          className="remove-button"
+                          onClick={() => {
+                            setConfirmReplace(false);
+                            dispatch(truncateFrom(view!));
+                          }}
+                        >
+                          Confirm: delete {doc.steps.length - view!} later step
+                          {doc.steps.length - view! === 1 ? "" : "s"}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="subtle-button"
+                          onClick={() => setConfirmReplace(true)}
+                        >
+                          Replace later steps
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="text-button"
+                        onClick={() => {
+                          setConfirmReplace(false);
+                          dispatch(setView(null));
+                        }}
+                      >
+                        Return to latest
+                      </button>
+                    </div>
+                  </div>
+                ) : null
+              }
               board={board}
               library={library}
               active={pane === "board"}
@@ -351,30 +795,77 @@ export default function App() {
                 settingsDialog.current?.showModal();
               }}
             />
-            <SetupPanel
-              active={pane === "setup"}
-              board={board}
-              selected={selection}
-              card={selectedCard}
-              instance={instance}
-              pending={pending}
-              library={library}
-              placementError={placementError}
-              onSelect={choose}
-              onPlace={place}
-              onPick={(source) => {
-                setPending(source);
-                changePane("board", true);
-              }}
-              onCancel={() => setPending(null)}
-              onPose={setPose}
-              onRemove={() => {
-                if (instance)
-                  dispatch(execute({ type: "remove", id: instance.id }));
-                select(null);
-                setPending(null);
-              }}
-            />
+            {side === "timeline" ? (
+              <Timeline
+                active={pane === "side"}
+                tabs={<SideTabs side={side} onChange={setSide} />}
+                doc={doc}
+                replayed={replayed}
+                viewIndex={viewIndex}
+                handlers={{
+                  onView: viewStep,
+                  onUpdate: (value) => dispatch(updateStep(value)),
+                  onDelete: (id) => dispatch(deleteStep(id)),
+                  onDuplicate: (id) => dispatch(duplicateStep({ id })),
+                  onMove: (id, delta) => dispatch(moveStep({ id, delta })),
+                  onTruncate: (index) => dispatch(truncateFrom(index)),
+                }}
+              />
+            ) : (
+              <SetupPanel
+                active={pane === "side"}
+                mode={mode}
+                tabs={<SideTabs side={side} onChange={setSide} />}
+                deckTools={
+                  <DeckTools
+                    deckAware={Boolean(doc.deckAware)}
+                    canImport={mode !== "replay"}
+                    warnings={deckWarnings(
+                      cardsIn(doc.initialBoard, "player-deck").flatMap((row) =>
+                        doc.cards[String(row.definitionId)]
+                          ? [doc.cards[String(row.definitionId)]!]
+                          : [],
+                      ),
+                      cardsIn(doc.initialBoard, "player-extra-deck").flatMap(
+                        (row) =>
+                          doc.cards[String(row.definitionId)]
+                            ? [doc.cards[String(row.definitionId)]!]
+                            : [],
+                      ),
+                      (id) =>
+                        catalog.status !== "ready" ||
+                        catalog.value.cards.some((card) => card.id === id),
+                    )}
+                    onDeckAware={(value) => dispatch(setDeckAware(value))}
+                    onImportYdk={(file) => void importYdk(file)}
+                  />
+                }
+                onRecordCard={recordCardAction}
+                board={board}
+                selected={selection}
+                card={selectedCard}
+                instance={instance}
+                pending={pending}
+                library={library}
+                placementError={placementError}
+                onSelect={choose}
+                onPlace={place}
+                onPick={(source) => {
+                  setPending(source);
+                  changePane("board", true);
+                }}
+                onCancel={() => setPending(null)}
+                onPose={setPose}
+                onRemove={() => {
+                  if (!instance) return;
+                  if (recording) recordCardAction("remove-card");
+                  else
+                    dispatch(setupChange({ type: "remove", id: instance.id }));
+                  select(null);
+                  setPending(null);
+                }}
+              />
+            )}
           </main>
           <DragOverlay dropAnimation={null}>
             {draggedCard && (
@@ -386,8 +877,40 @@ export default function App() {
         </DndContext>
       </ArtworkContext.Provider>
       <footer className="app-footer">
-        <span className="setup-state">
-          <Check size={15} aria-hidden="true" /> Setup Mode
+        <span className={`setup-state ${recording ? "is-recording" : ""}`}>
+          {mode === "replay" ? (
+            <Play size={15} aria-hidden="true" />
+          ) : recording ? (
+            <CircleDot size={15} aria-hidden="true" />
+          ) : (
+            <PencilRuler size={15} aria-hidden="true" />
+          )}{" "}
+          {mode === "replay"
+            ? `Replay · ${viewIndex === 0 ? "start" : `step ${viewIndex}`} of ${doc.steps.length}`
+            : recording
+              ? `Recording · ${doc.steps.length} step${doc.steps.length === 1 ? "" : "s"}`
+              : "Setup Mode"}
+          {recording && openGroup && (
+            <button
+              type="button"
+              className="text-button group-chip"
+              onClick={() => dispatch(closeGroup())}
+              title="Stop grouping new steps under the last activation"
+            >
+              End group (step{" "}
+              {doc.steps.findIndex(({ id }) => id === openGroup) + 1})
+            </button>
+          )}
+          <span
+            className={`save-state ${saveState.kind === "error" ? "save-error" : ""}`}
+            title={saveState.kind === "error" ? saveState.message : undefined}
+          >
+            {saveState.kind === "saved"
+              ? `Draft saved ${timeFormat.format(new Date(saveState.at))}`
+              : saveState.kind === "error"
+                ? "Draft not saved"
+                : "Not saved yet"}
+          </span>
         </span>
         <div
           className={notice?.error ? "notice notice-error" : "notice"}
@@ -405,7 +928,8 @@ export default function App() {
               </button>
             </>
           ) : (
-            (notice?.message ?? "Setup stays in this tab.")
+            (notice?.message ??
+            "Set up the starting board, then switch to Record.")
           )}
         </div>
         <a
@@ -416,9 +940,63 @@ export default function App() {
           Card data and images by YGOPRODeck
         </a>
       </footer>
+      <SkillDialog
+        open={skillOpen}
+        character={doc.character}
+        skill={doc.skill}
+        onSave={(value) => {
+          dispatch(setDuelist(value));
+          setSkillOpen(false);
+        }}
+        onClose={() => setSkillOpen(false)}
+      />
+      <ExportDialog
+        open={exportOpen}
+        doc={doc}
+        replayed={replayed}
+        artworkUrl={artwork}
+        details={
+          <ComboDetails
+            key={`${doc.id}-${doc.title}-${doc.description ?? ""}`}
+            title={doc.title}
+            description={doc.description}
+            onSave={(value) => dispatch(setDetails(value))}
+          />
+        }
+        onClose={() => setExportOpen(false)}
+      />
+      <CombosDialog
+        open={combosOpen}
+        doc={doc}
+        dirty={dirty}
+        details={
+          <ComboDetails
+            key={`${doc.id}-${doc.title}-${doc.description ?? ""}`}
+            title={doc.title}
+            description={doc.description}
+            onSave={(value) => dispatch(setDetails(value))}
+          />
+        }
+        onOpen={openDocument}
+        onSaved={(saved) =>
+          setLastSaved({ id: saved.id, updatedAt: saved.updatedAt })
+        }
+        onRenameOpen={(title) =>
+          dispatch(setDetails({ title, description: doc.description ?? "" }))
+        }
+        onClose={() => setCombosOpen(false)}
+      />
+      <ActionMenu
+        request={request}
+        board={board}
+        cards={doc.cards}
+        deckAware={Boolean(doc.deckAware)}
+        onRecord={recordAction}
+        onCancel={() => setRequest(null)}
+      />
       <BoardSettings
         dialog={settingsDialog}
-        board={board}
+        board={doc.initialBoard}
         error={settingsError}
         onSave={applySettings}
       />

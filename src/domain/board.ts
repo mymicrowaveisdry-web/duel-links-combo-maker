@@ -92,6 +92,9 @@ export function zoneName(zone: Zone) {
     : `Shared ${zone.label}`;
 }
 
+export const statKeys = ["attack", "defense", "level", "rank"] as const;
+export type StatKey = (typeof statKeys)[number];
+
 export interface CardInstance {
   id: number;
   definitionId: number;
@@ -100,6 +103,13 @@ export interface CardInstance {
   zone: ZoneId;
   position: Position;
   faceUp: boolean;
+  /** Parent instance when this card is an Xyz material. It shares the parent's zone. */
+  attachedTo?: number;
+  counters?: Record<string, number>;
+  /** Manual stat values that replace the printed ones. */
+  stats?: Partial<Record<StatKey, number>>;
+  /** Manual status markers such as "Negated" or "Effect used". */
+  markers?: string[];
 }
 
 export interface Board {
@@ -126,8 +136,20 @@ export function createBoard(): Board {
   };
 }
 
+/** Cards in a zone in pile order (bottom first). Xyz materials are excluded. */
 export function cardsIn(board: Board, zone: ZoneId) {
-  return board.instances.filter((instance) => instance.zone === zone);
+  return board.instances.filter(
+    (instance) => instance.zone === zone && instance.attachedTo === undefined,
+  );
+}
+
+/** Xyz materials attached to an instance, oldest first. */
+export function materialsOf(board: Board, id: number) {
+  return board.instances.filter(({ attachedTo }) => attachedTo === id);
+}
+
+export function isMonsterZone(zone: Zone) {
+  return zone.kind === "monster" || zone.kind === "extra-monster";
 }
 
 export type Placement =
@@ -155,6 +177,12 @@ export type BoardAction =
         "life" | "turn" | "active" | "phase" | "handSize" | "pendulum"
       >;
     }
+  | {
+      /** Replaces the player's Main Deck and Extra Deck, as when importing a YDK file. */
+      type: "load-deck";
+      main: CardDefinition[];
+      extra: CardDefinition[];
+    }
   | { type: "reset" };
 
 type Result =
@@ -179,9 +207,19 @@ export function canPlace(
       (source.kind === "catalog" ? source.definitionId : undefined)) !== card.id
   )
     return "The card definition does not match this selection.";
-  if (instance?.zone === id) return "The card is already in this zone.";
+  if (instance?.zone === id && instance.attachedTo === undefined)
+    return "The card is already in this zone.";
   if (zone.single && cardsIn(board, id).length)
     return `${zoneName(zone)} is occupied.`;
+  return zoneRule(board, card, zone);
+}
+
+/** Card-type rules for a zone, independent of occupancy. */
+export function zoneRule(
+  board: Board,
+  card: CardDefinition,
+  zone: Zone,
+): string | undefined {
   if (zone.kind === "pendulum" && zone.side && !board.pendulum[zone.side])
     return "Enable dedicated Pendulum Zones in board settings.";
   if (
@@ -247,8 +285,11 @@ export function applyBoardAction(board: Board, action: BoardAction): Result {
       };
     }
     case "remove": {
-      const instances = board.instances.filter(({ id }) => id !== action.id);
-      if (instances.length === board.instances.length)
+      // Removing a card also removes the materials attached to it.
+      const instances = board.instances.filter(
+        ({ id, attachedTo }) => id !== action.id && attachedTo !== action.id,
+      );
+      if (!board.instances.some(({ id }) => id === action.id))
         return { ok: false, message: "That card is no longer on the board." };
       return {
         ok: true,
@@ -320,6 +361,40 @@ export function applyBoardAction(board: Board, action: BoardAction): Result {
         ok: true,
         board: { ...board, ...settings },
         message: "Board settings updated.",
+      };
+    }
+    case "load-deck": {
+      const extraZone = getZone("player-extra-deck");
+      const wrong = action.extra.find((card) =>
+        zoneRule(board, card, extraZone),
+      );
+      if (wrong)
+        return {
+          ok: false,
+          message: `${wrong.name} cannot go in the Extra Deck.`,
+        };
+      let nextId = board.nextId;
+      const make = (card: CardDefinition, zone: ZoneId): CardInstance => ({
+        id: nextId++,
+        definitionId: card.id,
+        owner: "player",
+        controller: "player",
+        zone,
+        position: "attack",
+        faceUp: true,
+      });
+      const kept = board.instances.filter(
+        ({ zone }) => zone !== "player-deck" && zone !== "player-extra-deck",
+      );
+      const instances = [
+        ...kept,
+        ...action.main.map((card) => make(card, "player-deck")),
+        ...action.extra.map((card) => make(card, "player-extra-deck")),
+      ];
+      return {
+        ok: true,
+        board: { ...board, instances, nextId },
+        message: `Loaded ${action.main.length} Main Deck and ${action.extra.length} Extra Deck cards.`,
       };
     }
     case "reset":
