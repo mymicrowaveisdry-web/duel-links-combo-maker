@@ -15,5 +15,9 @@
     "cardInfo": "https://db.ygoprodeck.com/api/v7/cardinfo.php?format=duel%20links&misc=yes",
     "cardImages": "https://images.ygoprodeck.com/images/cards_small/",
     "attribution": "https://ygoprodeck.com/api-guide/"
+  },
+  "testing": {
+    "subpath": "/combo-maker-e2e/",
+    "port": 4173
   }
 }

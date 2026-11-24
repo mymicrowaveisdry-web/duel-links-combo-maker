@@ -29,6 +29,13 @@ export const appConfigSchema = z.object({
   local: z.object({
     cardResponse: relative,
   }),
+  /** End-to-end tests serve the production build under this subpath and port. */
+  testing: z.object({
+    subpath: z
+      .string()
+      .regex(/^\/[a-z0-9-]+\/$/, "Use a subpath such as /name/."),
+    port: z.number().int().min(1024).max(65535),
+  }),
   sources: z.object({
     cardInfo: z.string().url(),
     cardImages: z.string().url(),

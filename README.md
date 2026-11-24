@@ -21,7 +21,22 @@ npm run dev
 
 Use Node 24. Open the local address printed by Vite. Use `npm run build` to create the static build in `dist/` and `npm run preview` to serve it locally. The app and catalog use relative asset paths for project-subpath hosting.
 
-`npm run typecheck` and `npm run lint` check the source. `npm run test` runs the manual unit suite. `npm run format` applies the source formatter.
+`npm run typecheck` and `npm run lint` check the source. `npm run format` applies the source formatter.
+
+## Testing
+
+```sh
+npm run test        # unit and store tests (Vitest)
+npm run test:e2e    # end-to-end scenarios (Playwright)
+```
+
+`npm run test:watch` and `npm run test:coverage` are also available. The end-to-end suite builds the app, serves the production build under the test subpath in [app.config.json](app.config.json) (`testing.subpath`), and runs the guide's workflow scenarios. These cover a basic combo with TXT and PNG export, a Skill combo, undo and redo, keyboard-only placement, local saves and recovery, JSON round trips and rejection, an Xyz Summon with materials, missing artwork, timeline repair and insertion, an 80-step combo, and a tap-only phone flow.
+
+Install a Playwright browser once with `npx playwright install chromium`, or set `PLAYWRIGHT_CHANNEL=msedge` (or `chrome`) to use an installed browser. Tests use their own browser profile and never touch your saved combos.
+
+## Deployment
+
+The build in `dist/` is static and uses relative paths, so it works from any GitHub Pages project path. [CI](.github/workflows/ci.yml) runs lint, typecheck, unit tests, the build and the end-to-end suite on pull requests and pushes to `main`. [Deploy](.github/workflows/deploy.yml) runs the same checks on `main` and publishes to GitHub Pages only if they pass. To enable it, open **Settings → Pages** and set **Source** to **GitHub Actions**. Card images are not in the repository, so the published site shows text card faces.
 
 ## Configuration
 

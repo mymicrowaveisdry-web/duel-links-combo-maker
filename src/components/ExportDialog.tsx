@@ -175,6 +175,7 @@ function Check({
 interface Preview {
   urls: string[];
   blobs: Blob[];
+  sizes: Array<{ width: number; height: number }>;
 }
 
 function PngTab({
@@ -217,7 +218,11 @@ function PngTab({
         .then((pages) => {
           if (!live) return;
           created = pages.map((page) => URL.createObjectURL(page.blob));
-          setPreview({ urls: created, blobs: pages.map((page) => page.blob) });
+          setPreview({
+            urls: created,
+            blobs: pages.map((page) => page.blob),
+            sizes: pages.map(({ width, height }) => ({ width, height })),
+          });
         })
         .catch((reason: unknown) => {
           if (live)
@@ -366,6 +371,8 @@ function PngTab({
             <img
               key={url}
               src={url}
+              width={preview.sizes[index]?.width}
+              height={preview.sizes[index]?.height}
               alt={`Combo guide preview${pages > 1 ? `, image ${index + 1} of ${pages}` : ""}`}
             />
           ))}
