@@ -151,7 +151,9 @@ const combo = createSlice({
         const card =
           action.type === "place" || action.type === "pose"
             ? [action.card]
-            : [];
+            : action.type === "load-deck"
+              ? [...action.main, ...action.extra]
+              : [];
         const next: ComboDocument = {
           ...doc,
           initialBoard: result.board,
@@ -401,6 +403,71 @@ const combo = createSlice({
         );
       },
     },
+    /** Renames the combo and sets its description. */
+    setDetails: {
+      prepare: (value: { title: string; description: string }) => stamp(value),
+      reducer(
+        state,
+        {
+          payload: { value, now },
+        }: PayloadAction<{
+          value: { title: string; description: string };
+          now: string;
+        }>,
+      ) {
+        const doc = { ...current(state.doc), updatedAt: now };
+        const title = value.title.trim() || "Untitled combo";
+        const description = value.description.trim();
+        delete doc.description;
+        commit(
+          state,
+          {
+            doc: { ...doc, title, ...(description ? { description } : {}) },
+            openGroup: state.openGroup,
+          },
+          `Combo renamed to ${title}.`,
+        );
+      },
+    },
+    setDeckAware: {
+      prepare: (value: boolean) => stamp(value),
+      reducer(
+        state,
+        {
+          payload: { value, now },
+        }: PayloadAction<{ value: boolean; now: string }>,
+      ) {
+        const doc = { ...current(state.doc), updatedAt: now };
+        delete doc.deckAware;
+        commit(
+          state,
+          {
+            doc: value ? { ...doc, deckAware: true } : doc,
+            openGroup: state.openGroup,
+          },
+          value
+            ? "Deck-aware recording on. Cards come from the modelled Decks unless added from outside."
+            : "Free-form recording on. Cards can come straight from the card browser.",
+        );
+      },
+    },
+    /**
+     * Opens a validated document (a saved combo, a recovered draft or an import). It
+     * replaces the open combo and clears undo history.
+     */
+    loadDocument(
+      state,
+      { payload }: PayloadAction<{ doc: ComboDocument; message: string }>,
+    ) {
+      state.doc = payload.doc;
+      state.openGroup = null;
+      state.mode = "setup";
+      state.view = null;
+      state.insertArmed = false;
+      state.past = [];
+      state.future = [];
+      state.notice = { message: payload.message, error: false };
+    },
     setView(state, { payload }: PayloadAction<number | null>) {
       const last = state.doc.steps.length;
       state.view =
@@ -413,6 +480,9 @@ const combo = createSlice({
         message: `New steps are inserted after step ${state.view ?? 0}. Later steps are revalidated.`,
         error: false,
       };
+    },
+    inform(state, { payload }: PayloadAction<string>) {
+      state.notice = { message: payload, error: false };
     },
     notify(state, { payload }: PayloadAction<string>) {
       state.notice = { message: payload, error: true };
@@ -472,8 +542,12 @@ export const {
   duplicateStep,
   moveStep,
   setDuelist,
+  setDetails,
+  setDeckAware,
+  loadDocument,
   setView,
   armInsert,
+  inform,
   notify,
   closeGroup,
   setMode,

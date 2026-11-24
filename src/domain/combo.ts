@@ -164,6 +164,9 @@ export interface ComboDocument {
   id: string;
   title: string;
   format: "speed-duel";
+  description?: string;
+  /** Recording uses only the modelled Deck and Extra Deck unless a card is added from outside. */
+  deckAware?: boolean;
   character?: CharacterSnapshot;
   skill?: SkillSnapshot;
   initialBoard: Board;

@@ -24,16 +24,27 @@ export interface ActionRequest {
  * Asks what a card movement means while recording. The same menu serves drag and
  * drop and the select-then-choose-zone flow, so neither path infers game semantics.
  */
+/** In deck-aware mode a card from the browser can only enter play from outside the Deck. */
+const outsideKinds: ReadonlySet<ActionKind> = new Set([
+  "add-from-outside",
+  "special-summon",
+  "activate-card",
+  "set-spell-trap",
+  "custom",
+]);
+
 export function ActionMenu({
   request,
   board,
   cards,
+  deckAware,
   onRecord,
   onCancel,
 }: {
   request: ActionRequest | null;
   board: Board;
   cards: CardBook;
+  deckAware: boolean;
   onRecord: (action: ComboAction, newCards: CardDefinition[]) => void;
   onCancel: () => void;
 }) {
@@ -58,6 +69,7 @@ export function ActionMenu({
           request={request}
           board={board}
           cards={cards}
+          deckAware={deckAware}
           onRecord={onRecord}
           onCancel={() => dialog.current?.close()}
         />
@@ -70,21 +82,25 @@ function ActionForm({
   request,
   board,
   cards,
+  deckAware,
   onRecord,
   onCancel,
 }: {
   request: ActionRequest;
   board: Board;
   cards: CardBook;
+  deckAware: boolean;
   onRecord: (action: ComboAction, newCards: CardDefinition[]) => void;
   onCancel: () => void;
 }) {
   const { source, card, destination } = request;
   const book = useMemo(() => withCards(cards, [card]), [cards, card]);
-  const options = useMemo(
-    () => suggestActions(board, source, card, destination, book),
-    [board, source, card, destination, book],
-  );
+  const options = useMemo(() => {
+    const all = suggestActions(board, source, card, destination, book);
+    return deckAware && source.kind === "catalog"
+      ? all.filter((kind) => outsideKinds.has(kind))
+      : all;
+  }, [board, source, card, destination, book, deckAware]);
   const [kind, setKind] = useState<ActionKind>(options[0] ?? "custom");
   const [materials, setMaterials] = useState<number[]>([]);
   const [detail, setDetail] = useState("");

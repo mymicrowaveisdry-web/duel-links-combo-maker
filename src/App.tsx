@@ -11,12 +11,15 @@ import type { DragEndEvent, DragStartEvent } from "@dnd-kit/core";
 import {
   CircleDot,
   ClipboardList,
+  Download,
   FilePlus2,
+  FolderOpen,
   Layers3,
   ListOrdered,
   PencilRuler,
   Play,
   Redo2,
+  Save,
   Swords,
   Undo2,
 } from "lucide-react";
@@ -25,6 +28,9 @@ import { ActionMenu } from "./components/ActionMenu";
 import type { ActionRequest } from "./components/ActionMenu";
 import { BoardPanel } from "./components/BoardPanel";
 import { BoardSettings } from "./components/BoardSettings";
+import { ComboDetails, CombosDialog } from "./components/CombosDialog";
+import { DeckTools } from "./components/DeckTools";
+import { ExportDialog } from "./components/ExportDialog";
 import { DuelistSummary, SkillDialog } from "./components/Duelist";
 import { PlaybackBar, SideTabs, playbackSpeeds } from "./components/Playback";
 import type { PlaybackSpeed } from "./components/Playback";
@@ -44,13 +50,29 @@ import {
   buildDuelAction,
   recordingTargetError,
 } from "./domain/actions";
-import { canPlace, zones } from "./domain/board";
+import { canPlace, cardsIn, zones } from "./domain/board";
+import {
+  deckWarnings,
+  maximumYdkBytes,
+  parseYdk,
+  resolveYdk,
+} from "./domain/deck";
 import type { BoardAction, Placement, Position, ZoneId } from "./domain/board";
-import type { ActionKind, ComboAction } from "./domain/combo";
+import type { ActionKind, ComboAction, ComboDocument } from "./domain/combo";
+import {
+  loadDraft,
+  saveCombo,
+  saveDraft,
+  storageMessage,
+} from "./persistence/database";
 import {
   armInsert,
   closeGroup,
   deleteStep,
+  inform,
+  loadDocument,
+  setDeckAware,
+  setDetails,
   duplicateStep,
   moveStep,
   notify,
@@ -79,6 +101,25 @@ const panes = [
   { pane: "side", side: "setup", label: "Details", Icon: ClipboardList },
 ] as const;
 
+/** Whether a document holds anything worth saving or recovering. */
+function hasContent(doc: ComboDocument) {
+  return Boolean(
+    doc.steps.length ||
+    doc.initialBoard.instances.length ||
+    doc.title !== "Untitled combo" ||
+    doc.description ||
+    doc.skill ||
+    doc.character,
+  );
+}
+
+type SaveState =
+  | { kind: "idle" }
+  | { kind: "saved"; at: string }
+  | { kind: "error"; message: string };
+
+const timeFormat = new Intl.DateTimeFormat(undefined, { timeStyle: "short" });
+
 const speedKey = "dlcm.playbackSpeed";
 function readSpeed(): PlaybackSpeed {
   try {
@@ -103,6 +144,14 @@ export default function App() {
   const [playing, setPlaying] = useState<object | null>(null);
   const [confirmReplace, setConfirmReplace] = useState(false);
   const [skillOpen, setSkillOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [combosOpen, setCombosOpen] = useState(false);
+  const [restored, setRestored] = useState(false);
+  const [saveState, setSaveState] = useState<SaveState>({ kind: "idle" });
+  const [lastSaved, setLastSaved] = useState<{
+    id: string;
+    updatedAt: string;
+  } | null>(null);
   const [settingsError, setSettingsError] = useState("");
   const [request, setRequest] = useState<ActionRequest | null>(null);
   const settingsDialog = useRef<HTMLDialogElement>(null);
@@ -122,6 +171,9 @@ export default function App() {
   const behind = recording && view !== null && view < doc.steps.length;
   const isPlaying = playing === doc && mode === "replay";
   const hasHistory = Boolean(past.length || future.length);
+  const dirty =
+    hasContent(doc) &&
+    !(lastSaved?.id === doc.id && lastSaved.updatedAt === doc.updatedAt);
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 7 } }),
     useSensor(TouchSensor, {
@@ -185,15 +237,55 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [isPlaying, viewIndex, lastIndex, speed, dispatch]);
 
+  // Recover the autosaved draft once, unless work has already started.
   useEffect(() => {
-    if (!hasHistory) return;
+    let live = true;
+    loadDraft()
+      .then((draft) => {
+        if (!live || !draft || !hasContent(draft)) return;
+        if (hasContent(store.getState().combo.doc)) return;
+        dispatch(
+          loadDocument({
+            doc: draft,
+            message: "Recovered your last session from this browser.",
+          }),
+        );
+      })
+      .catch((error: unknown) => {
+        if (live)
+          setSaveState({ kind: "error", message: storageMessage(error) });
+      })
+      .finally(() => live && setRestored(true));
+    return () => {
+      live = false;
+    };
+  }, [dispatch]);
+
+  // Autosave a draft shortly after each change, after recovery has run.
+  useEffect(() => {
+    if (!restored) return;
+    const timer = window.setTimeout(() => {
+      const at = new Date().toISOString();
+      saveDraft(doc, at)
+        .then(() => setSaveState({ kind: "saved", at }))
+        .catch((error: unknown) =>
+          setSaveState({ kind: "error", message: storageMessage(error) }),
+        );
+    }, 700);
+    return () => window.clearTimeout(timer);
+  }, [doc, restored]);
+
+  // Warn before leaving only when the draft could not be stored.
+  const unsafe = saveState.kind === "error" && hasContent(doc);
+  useEffect(() => {
+    if (!unsafe) return;
     function onLeave(event: BeforeUnloadEvent) {
       event.preventDefault();
       event.returnValue = "";
     }
     window.addEventListener("beforeunload", onLeave);
     return () => window.removeEventListener("beforeunload", onLeave);
-  }, [hasHistory]);
+  }, [unsafe]);
 
   // Catalog cards plus the snapshots saved in the combo, so recorded cards always resolve.
   const library = useMemo(() => {
@@ -316,6 +408,48 @@ export default function App() {
         },
       }),
     );
+  }
+
+  function quickSave() {
+    const saving = doc;
+    saveCombo(saving, new Date().toISOString())
+      .then(() => {
+        setLastSaved({ id: saving.id, updatedAt: saving.updatedAt });
+        dispatch(inform(`Saved ${saving.title} in this browser.`));
+      })
+      .catch((error: unknown) => dispatch(notify(storageMessage(error))));
+  }
+
+  function openDocument(next: ComboDocument, message: string) {
+    setPlaying(null);
+    setPending(null);
+    setRequest(null);
+    select(null);
+    dispatch(loadDocument({ doc: next, message }));
+    setLastSaved({ id: next.id, updatedAt: next.updatedAt });
+  }
+
+  async function importYdk(file: File) {
+    if (file.size > maximumYdkBytes) {
+      dispatch(notify("The deck file is too large."));
+      return;
+    }
+    const parsed = parseYdk(await file.text());
+    if ("error" in parsed) {
+      dispatch(notify(`Deck import failed. ${parsed.error}`));
+      return;
+    }
+    const deck = resolveYdk(parsed, (id) => library.get(id));
+    dispatch(
+      setupChange({ type: "load-deck", main: deck.main, extra: deck.extra }),
+    );
+    const result = store.getState().combo.notice;
+    if (!result?.error && deck.missing.length)
+      dispatch(
+        inform(
+          `${result?.message ?? "Deck loaded."} ${deck.missing.length} card ID${deck.missing.length === 1 ? " was" : "s were"} not in the catalog and skipped.`,
+        ),
+      );
   }
 
   function viewStep(index: number) {
@@ -461,7 +595,7 @@ export default function App() {
           <button
             type="button"
             className="subtle-button reset-button"
-            disabled={!hasHistory}
+            disabled={!hasHistory && !hasContent(doc)}
             title="Start a new combo. Undo restores the previous one."
             onClick={() => {
               select(null);
@@ -471,6 +605,32 @@ export default function App() {
           >
             <FilePlus2 size={16} aria-hidden="true" /> <span>New Combo</span>
           </button>
+          <div className="file-buttons">
+            <button
+              type="button"
+              className="subtle-button header-action"
+              onClick={() => setCombosOpen(true)}
+              title="Open, manage and import combos"
+            >
+              <FolderOpen size={16} aria-hidden="true" /> <span>Open</span>
+            </button>
+            <button
+              type="button"
+              className="subtle-button header-action"
+              onClick={quickSave}
+              title="Save this combo in this browser"
+            >
+              <Save size={16} aria-hidden="true" /> <span>Save</span>
+            </button>
+            <button
+              type="button"
+              className="primary-button header-action"
+              onClick={() => setExportOpen(true)}
+              title="Export PNG, text or JSON"
+            >
+              <Download size={16} aria-hidden="true" /> <span>Export</span>
+            </button>
+          </div>
           <div className="history-buttons">
             <button
               type="button"
@@ -656,6 +816,30 @@ export default function App() {
                 active={pane === "side"}
                 mode={mode}
                 tabs={<SideTabs side={side} onChange={setSide} />}
+                deckTools={
+                  <DeckTools
+                    deckAware={Boolean(doc.deckAware)}
+                    canImport={mode !== "replay"}
+                    warnings={deckWarnings(
+                      cardsIn(doc.initialBoard, "player-deck").flatMap((row) =>
+                        doc.cards[String(row.definitionId)]
+                          ? [doc.cards[String(row.definitionId)]!]
+                          : [],
+                      ),
+                      cardsIn(doc.initialBoard, "player-extra-deck").flatMap(
+                        (row) =>
+                          doc.cards[String(row.definitionId)]
+                            ? [doc.cards[String(row.definitionId)]!]
+                            : [],
+                      ),
+                      (id) =>
+                        catalog.status !== "ready" ||
+                        catalog.value.cards.some((card) => card.id === id),
+                    )}
+                    onDeckAware={(value) => dispatch(setDeckAware(value))}
+                    onImportYdk={(file) => void importYdk(file)}
+                  />
+                }
                 onRecordCard={recordCardAction}
                 board={board}
                 selected={selection}
@@ -717,6 +901,16 @@ export default function App() {
               {doc.steps.findIndex(({ id }) => id === openGroup) + 1})
             </button>
           )}
+          <span
+            className={`save-state ${saveState.kind === "error" ? "save-error" : ""}`}
+            title={saveState.kind === "error" ? saveState.message : undefined}
+          >
+            {saveState.kind === "saved"
+              ? `Draft saved ${timeFormat.format(new Date(saveState.at))}`
+              : saveState.kind === "error"
+                ? "Draft not saved"
+                : "Not saved yet"}
+          </span>
         </span>
         <div
           className={notice?.error ? "notice notice-error" : "notice"}
@@ -756,10 +950,47 @@ export default function App() {
         }}
         onClose={() => setSkillOpen(false)}
       />
+      <ExportDialog
+        open={exportOpen}
+        doc={doc}
+        replayed={replayed}
+        artworkUrl={artwork}
+        details={
+          <ComboDetails
+            key={`${doc.id}-${doc.title}-${doc.description ?? ""}`}
+            title={doc.title}
+            description={doc.description}
+            onSave={(value) => dispatch(setDetails(value))}
+          />
+        }
+        onClose={() => setExportOpen(false)}
+      />
+      <CombosDialog
+        open={combosOpen}
+        doc={doc}
+        dirty={dirty}
+        details={
+          <ComboDetails
+            key={`${doc.id}-${doc.title}-${doc.description ?? ""}`}
+            title={doc.title}
+            description={doc.description}
+            onSave={(value) => dispatch(setDetails(value))}
+          />
+        }
+        onOpen={openDocument}
+        onSaved={(saved) =>
+          setLastSaved({ id: saved.id, updatedAt: saved.updatedAt })
+        }
+        onRenameOpen={(title) =>
+          dispatch(setDetails({ title, description: doc.description ?? "" }))
+        }
+        onClose={() => setCombosOpen(false)}
+      />
       <ActionMenu
         request={request}
         board={board}
         cards={doc.cards}
+        deckAware={Boolean(doc.deckAware)}
         onRecord={recordAction}
         onCancel={() => setRequest(null)}
       />

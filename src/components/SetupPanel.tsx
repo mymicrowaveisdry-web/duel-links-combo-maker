@@ -28,6 +28,7 @@ export function SetupPanel({
   active,
   mode,
   tabs,
+  deckTools,
   onRecordCard,
   board,
   selected,
@@ -46,6 +47,7 @@ export function SetupPanel({
   active: boolean;
   mode: Mode;
   tabs: ReactNode;
+  deckTools: ReactNode;
   onRecordCard: (
     kind: ActionKind,
     options?: Parameters<typeof buildCardAction>[3],
@@ -348,6 +350,7 @@ export function SetupPanel({
               <ArrowUpRight size={15} aria-hidden="true" />
             </button>
           ))}
+          {deckTools}
         </div>
       </div>
     </aside>

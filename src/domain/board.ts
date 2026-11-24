@@ -177,6 +177,12 @@ export type BoardAction =
         "life" | "turn" | "active" | "phase" | "handSize" | "pendulum"
       >;
     }
+  | {
+      /** Replaces the player's Main Deck and Extra Deck, as when importing a YDK file. */
+      type: "load-deck";
+      main: CardDefinition[];
+      extra: CardDefinition[];
+    }
   | { type: "reset" };
 
 type Result =
@@ -355,6 +361,40 @@ export function applyBoardAction(board: Board, action: BoardAction): Result {
         ok: true,
         board: { ...board, ...settings },
         message: "Board settings updated.",
+      };
+    }
+    case "load-deck": {
+      const extraZone = getZone("player-extra-deck");
+      const wrong = action.extra.find((card) =>
+        zoneRule(board, card, extraZone),
+      );
+      if (wrong)
+        return {
+          ok: false,
+          message: `${wrong.name} cannot go in the Extra Deck.`,
+        };
+      let nextId = board.nextId;
+      const make = (card: CardDefinition, zone: ZoneId): CardInstance => ({
+        id: nextId++,
+        definitionId: card.id,
+        owner: "player",
+        controller: "player",
+        zone,
+        position: "attack",
+        faceUp: true,
+      });
+      const kept = board.instances.filter(
+        ({ zone }) => zone !== "player-deck" && zone !== "player-extra-deck",
+      );
+      const instances = [
+        ...kept,
+        ...action.main.map((card) => make(card, "player-deck")),
+        ...action.extra.map((card) => make(card, "player-extra-deck")),
+      ];
+      return {
+        ok: true,
+        board: { ...board, instances, nextId },
+        message: `Loaded ${action.main.length} Main Deck and ${action.extra.length} Extra Deck cards.`,
       };
     }
     case "reset":
