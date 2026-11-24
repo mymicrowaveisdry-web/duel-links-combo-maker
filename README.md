@@ -10,7 +10,7 @@ A browser-local editor for documenting Yu-Gi-Oh! Duel Links Speed Duel combos. S
 - **Setup** edits the starting board. **Record** turns each move into a typed step through an action menu, with atomic summons, Xyz materials and grouped effects. **Replay** steps through the combo without changing it.
 - A timeline with editable descriptions and notes, insertion, reordering, deletion, repair of steps that no longer apply, playback at 0.5–2× and full undo/redo.
 - Character (free text) and Skill selection from a bundled Skill snapshot or a custom Skill. A combo keeps the Skill text it was written with.
-- Exports: vertical or endboard-only PNG guides with a preview (long combos split into numbered images), plain or Discord-formatted text with copy, and versioned JSON backups.
+- Exports: vertical, horizontal (landscape) or endboard-only PNG guides with a preview (long combos split into numbered images), plain or Discord-formatted text with copy, and versioned JSON backups.
 - Saves, an autosaved draft and recovery stay in this browser through IndexedDB. Nothing is uploaded. Export JSON backups for combos you want to keep.
 - YDK deck import, optional deck-aware recording, and non-blocking deck warnings. Duel Links limits that are not officially confirmed are labelled provisional.
 

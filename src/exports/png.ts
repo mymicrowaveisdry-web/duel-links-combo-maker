@@ -8,7 +8,7 @@ import { cardLine, countNames } from "./model";
 import type { ExportCard, ExportModel, ExportSlot } from "./model";
 
 export interface PngOptions {
-  layout: "vertical" | "endboard";
+  layout: "vertical" | "horizontal" | "endboard";
   theme: "dark" | "light";
   scale: 1 | 2;
   thumb: "small" | "medium" | "large";
@@ -49,9 +49,21 @@ interface Block {
   draw: (ctx: Context, top: number) => void;
 }
 
-const width = 880;
 const pad = 36;
-const inner = width - pad * 2;
+/** Page widths in CSS pixels. The horizontal guide is a landscape image. */
+const pageWidths = { vertical: 880, horizontal: 1600, endboard: 880 } as const;
+
+/** Where content goes on a page: left edge, content width and page width. */
+interface Frame {
+  x: number;
+  inner: number;
+  page: number;
+}
+
+function frameFor(layout: PngOptions["layout"]): Frame {
+  const page = pageWidths[layout];
+  return { x: pad, inner: page - pad * 2, page };
+}
 const font = `"Segoe UI", system-ui, -apple-system, sans-serif`;
 const thumbSizes = {
   small: [40, 58],
@@ -114,8 +126,11 @@ export function wrapLines(
 }
 
 /** Largest page height (CSS pixels) that stays within common canvas limits. */
-export function pageLimit(scale: number) {
-  const byArea = 16_000_000 / (width * scale * scale);
+export function pageLimit(
+  scale: number,
+  pageWidth: number = pageWidths.vertical,
+) {
+  const byArea = 16_000_000 / (pageWidth * scale * scale);
   const bySide = 32_000 / scale;
   return Math.floor(Math.min(byArea, bySide)) - 8;
 }
@@ -268,19 +283,19 @@ function drawCard(
   ctx.restore();
 }
 
-function sectionTitle(palette: Palette, text: string): Block {
+function sectionTitle(palette: Palette, frame: Frame, text: string): Block {
   return {
     height: 46,
     draw: (c, top) => {
       c.strokeStyle = palette.border;
       c.lineWidth = 1;
       c.beginPath();
-      c.moveTo(pad, top + 10);
-      c.lineTo(width - pad, top + 10);
+      c.moveTo(frame.x, top + 10);
+      c.lineTo(frame.x + frame.inner, top + 10);
       c.stroke();
       c.fillStyle = palette.accent;
       setFont(c, 14, 750);
-      c.fillText(text.toUpperCase(), pad, top + 36);
+      c.fillText(text.toUpperCase(), frame.x, top + 36);
     },
   };
 }
@@ -288,6 +303,7 @@ function sectionTitle(palette: Palette, text: string): Block {
 function textBlock(
   ctx: Context,
   palette: Palette,
+  frame: Frame,
   text: string,
   size: number,
   options: {
@@ -299,7 +315,7 @@ function textBlock(
   } = {},
 ): Block {
   setFont(ctx, size, options.weight ?? 400, options.style ?? "");
-  let lines = wrapLines((t) => ctx.measureText(t).width, text, inner);
+  let lines = wrapLines((t) => ctx.measureText(t).width, text, frame.inner);
   if (options.maxLines && lines.length > options.maxLines)
     lines = [
       ...lines.slice(0, options.maxLines - 1),
@@ -312,7 +328,7 @@ function textBlock(
       setFont(c, size, options.weight ?? 400, options.style ?? "");
       c.fillStyle = options.color ?? palette.text;
       lines.forEach((line, index) =>
-        c.fillText(line, pad, top + size + index * lineHeight),
+        c.fillText(line, frame.x, top + size + index * lineHeight),
       );
     },
   };
@@ -321,10 +337,11 @@ function textBlock(
 function cardRow(
   palette: Palette,
   images: Images,
+  frame: Frame,
   cards: readonly ExportCard[],
   [w, h]: readonly [number, number],
 ): Block {
-  const perRow = Math.max(1, Math.floor((inner + 8) / (w + 8)));
+  const perRow = Math.max(1, Math.floor((frame.inner + 8) / (w + 8)));
   const rows = Math.ceil(cards.length / perRow);
   return {
     height: rows * (h + 8) + 4,
@@ -334,7 +351,7 @@ function cardRow(
           c,
           palette,
           images,
-          pad + (index % perRow) * (w + 8),
+          frame.x + (index % perRow) * (w + 8),
           top + Math.floor(index / perRow) * (h + 8),
           w,
           h,
@@ -344,18 +361,42 @@ function cardRow(
   };
 }
 
+/** Two stacks of blocks drawn next to each other as one unsplittable block. */
+function sideBySide(
+  left: readonly Block[],
+  right: readonly Block[],
+  gapAfter = 0,
+): Block {
+  const total = (blocks: readonly Block[]) =>
+    blocks.reduce((sum, block) => sum + block.height, 0);
+  return {
+    height: Math.max(total(left), total(right)) + gapAfter,
+    draw: (c, top) => {
+      for (const stack of [left, right]) {
+        let y = top;
+        for (const block of stack) {
+          block.draw(c, y);
+          y += block.height;
+        }
+      }
+    },
+  };
+}
+
+/** Vertical layout: one step per row, with a down arrow between steps. */
 function stepBlock(
   ctx: Context,
   palette: Palette,
   images: Images,
+  frame: Frame,
   step: ExportModel["steps"][number],
   [w, h]: readonly [number, number],
   notes: boolean,
   last: boolean,
 ): Block {
   const indent = step.grouped ? 26 : 0;
-  const textX = pad + indent + w + 14 + 34;
-  const textWidth = width - pad - textX;
+  const textX = frame.x + indent + w + 14 + 34;
+  const textWidth = frame.x + frame.inner - textX;
   setFont(ctx, 16);
   const lines = wrapLines(
     (t) => ctx.measureText(t).width,
@@ -374,26 +415,12 @@ function stepBlock(
   return {
     height: body + 10 + connector,
     draw: (c, top) => {
-      const x = pad + indent;
+      const x = frame.x + indent;
       if (step.grouped) {
         c.fillStyle = palette.border;
-        c.fillRect(pad + 8, top - 4, 2, body + 14 + connector);
+        c.fillRect(frame.x + 8, top - 4, 2, body + 14 + connector);
       }
-      if (step.card)
-        drawCard(c, palette, images, x, top, w, h, {
-          card: step.card,
-          name: step.card.name,
-        });
-      else {
-        roundRect(c, x, top, w, h, 5);
-        c.fillStyle = palette.surface;
-        c.fill();
-        c.fillStyle = step.skill ? "#d4a514" : palette.muted;
-        setFont(c, Math.round(w / 2.4), 700);
-        c.textAlign = "center";
-        c.fillText(step.skill ? "★" : "•", x + w / 2, top + h / 2 + w / 7);
-        c.textAlign = "left";
-      }
+      drawStepCard(c, palette, images, step, x, top, w, h);
       c.fillStyle = palette.accent;
       setFont(c, 16, 750);
       c.fillText(
@@ -429,15 +456,188 @@ function stepBlock(
   };
 }
 
+/** The step's card, or a marker for steps without one (a star for Skills). */
+function drawStepCard(
+  c: Context,
+  palette: Palette,
+  images: Images,
+  step: ExportModel["steps"][number],
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+) {
+  if (step.card) {
+    drawCard(c, palette, images, x, y, w, h, {
+      card: step.card,
+      name: step.card.name,
+    });
+    return;
+  }
+  roundRect(c, x, y, w, h, 5);
+  c.fillStyle = palette.surface;
+  c.fill();
+  c.fillStyle = step.skill ? "#d4a514" : palette.muted;
+  setFont(c, Math.round(w / 2.4), 700);
+  c.textAlign = "center";
+  c.fillText(step.skill ? "★" : "•", x + w / 2, y + h / 2 + w / 7);
+  c.textAlign = "left";
+}
+
+/** Minimum tile width; tiles stretch to fill each row. */
+const tileWidth = 204;
+const tileGap = 30;
+
+/**
+ * Horizontal layout: steps read left to right as tiles joined by arrows and wrap
+ * into rows. Each row is its own block, so long combos split between rows.
+ */
+function stepTileRows(
+  ctx: Context,
+  palette: Palette,
+  images: Images,
+  frame: Frame,
+  steps: ExportModel["steps"],
+  [w, h]: readonly [number, number],
+  notes: boolean,
+): Block[] {
+  const perRow = Math.max(
+    1,
+    Math.floor((frame.inner + tileGap) / (tileWidth + tileGap)),
+  );
+  // Stretch the tiles so each full row spans the page.
+  const span = (frame.inner - (perRow - 1) * tileGap) / perRow;
+  const textWidth = span - 20;
+  const tiles = steps.map((step) => {
+    setFont(ctx, 14.5);
+    const lines = wrapLines(
+      (t) => ctx.measureText(t).width,
+      step.text,
+      textWidth,
+    );
+    setFont(ctx, 12.5, 400, "italic");
+    const noteLines =
+      notes && step.notes
+        ? wrapLines((t) => ctx.measureText(t).width, step.notes, textWidth)
+        : [];
+    const height =
+      10 +
+      h +
+      10 +
+      lines.length * 20 +
+      (noteLines.length ? 4 + noteLines.length * 17 : 0) +
+      10;
+    return { step, lines, noteLines, height };
+  });
+  const rows: Block[] = [];
+  for (let start = 0; start < tiles.length; start += perRow) {
+    const row = tiles.slice(start, start + perRow);
+    const rowHeight = Math.max(...row.map((tile) => tile.height));
+    const lastRow = start + perRow >= tiles.length;
+    rows.push({
+      height: rowHeight + (lastRow ? 8 : tileGap),
+      draw: (c, top) => {
+        row.forEach((tile, index) => {
+          const x = frame.x + index * (span + tileGap);
+          roundRect(c, x + 0.5, top + 0.5, span - 1, rowHeight - 1, 8);
+          c.fillStyle = palette.surface;
+          c.fill();
+          c.strokeStyle = palette.border;
+          c.lineWidth = 1;
+          c.stroke();
+          if (tile.step.grouped) {
+            // Steps that resolve as part of an activation get an accent edge.
+            c.fillStyle = palette.accent;
+            c.fillRect(x + 1, top + 8, 3, rowHeight - 16);
+          }
+          c.fillStyle = palette.accent;
+          setFont(c, 22, 750);
+          c.fillText(
+            String(tile.step.number).padStart(2, "0"),
+            x + 12,
+            top + 34,
+          );
+          drawStepCard(
+            c,
+            palette,
+            images,
+            tile.step,
+            x + span - 10 - w,
+            top + 10,
+            w,
+            h,
+          );
+          const textTop = top + 10 + h + 10;
+          c.fillStyle = palette.text;
+          setFont(c, 14.5);
+          tile.lines.forEach((line, lineIndex) =>
+            c.fillText(line, x + 10, textTop + 14 + lineIndex * 20),
+          );
+          c.fillStyle = palette.muted;
+          setFont(c, 12.5, 400, "italic");
+          tile.noteLines.forEach((line, lineIndex) =>
+            c.fillText(
+              line,
+              x + 10,
+              textTop + 14 + tile.lines.length * 20 + 4 + lineIndex * 17,
+            ),
+          );
+          const next = start + index + 1 < tiles.length;
+          if (next && index < row.length - 1) {
+            // Right arrow to the next tile in the row.
+            const ax = x + span + 6;
+            const ay = top + 10 + h / 2;
+            c.strokeStyle = palette.muted;
+            c.lineWidth = 1.5;
+            c.beginPath();
+            c.moveTo(ax, ay);
+            c.lineTo(ax + tileGap - 12, ay);
+            c.moveTo(ax + tileGap - 16, ay - 4);
+            c.lineTo(ax + tileGap - 12, ay);
+            c.lineTo(ax + tileGap - 16, ay + 4);
+            c.stroke();
+          }
+        });
+        if (!lastRow) {
+          // The flow continues at the start of the next row.
+          c.fillStyle = palette.muted;
+          setFont(c, 12.5, 650);
+          c.textAlign = "right";
+          c.fillText(
+            `continues with ${String(row.at(-1)!.step.number + 1).padStart(2, "0")} ↓`,
+            frame.x + frame.inner,
+            top + rowHeight + 19,
+          );
+          c.textAlign = "left";
+        }
+      },
+    });
+  }
+  return rows;
+}
+
+const boardGap = 12;
+const boardLabelHeight = 34;
+
+/** Width the final board needs for its widest row. */
+function boardWidth(model: ExportModel) {
+  const widest = Math.max(
+    model.endboard.extraMonsters.length,
+    1 + model.endboard.monsters.length,
+    model.endboard.pendulum.length + model.endboard.spells.length,
+  );
+  return widest * boardCard[0] + (widest - 1) * boardGap;
+}
+
 function boardBlock(
   palette: Palette,
   images: Images,
+  frame: Frame,
   model: ExportModel,
 ): Block {
   const [w, h] = boardCard;
-  const gap = 12;
-  const labelHeight = 34;
-  const slotHeight = h + labelHeight;
+  const gap = boardGap;
+  const slotHeight = h + boardLabelHeight;
   const rows: ExportSlot[][] = [];
   if (model.endboard.extraMonsters.some((slot) => slot.card))
     rows.push(model.endboard.extraMonsters);
@@ -451,7 +651,7 @@ function boardBlock(
     draw: (c, top) => {
       rows.forEach((row, rowIndex) => {
         const total = row.length * w + (row.length - 1) * gap;
-        let x = pad + (inner - total) / 2;
+        let x = frame.x + (frame.inner - total) / 2;
         const y = top + rowIndex * (slotHeight + gap);
         for (const slot of row) {
           if (slot.card) {
@@ -509,27 +709,29 @@ function buildBlocks(
   model: ExportModel,
   options: PngOptions,
 ): Block[] {
+  const frame = frameFor(options.layout);
+  const horizontal = options.layout === "horizontal";
   const blocks: Block[] = [];
   const thumb = thumbSizes[options.thumb];
+  const text = (
+    value: string,
+    size: number,
+    style: Parameters<typeof textBlock>[5] = {},
+    area: Frame = frame,
+  ) => textBlock(ctx, palette, area, value, size, style);
+  const muted = (value: string, size: number, area: Frame = frame) =>
+    text(value, size, { color: palette.muted }, area);
+
   blocks.push({ height: pad - 6, draw: () => undefined });
+  blocks.push(text(model.title, 32, { weight: 750, gapAfter: 4 }));
   blocks.push(
-    textBlock(ctx, palette, model.title, 32, { weight: 750, gapAfter: 4 }),
-  );
-  blocks.push(
-    textBlock(
-      ctx,
-      palette,
+    muted(
       `${model.format}${model.going ? `  ·  ${model.going}` : ""}${model.character ? `  ·  ${model.character}` : ""}`,
       15,
-      {
-        color: palette.muted,
-      },
     ),
   );
   blocks.push(
-    textBlock(
-      ctx,
-      palette,
+    text(
       `Skill: ${model.skill ? `${model.skill.name}${model.skill.custom ? " (custom)" : ""}` : "None"}`,
       16,
       { color: palette.accent, weight: 650 },
@@ -537,110 +739,111 @@ function buildBlocks(
   );
   if (options.skillText && model.skill?.description)
     blocks.push(
-      textBlock(ctx, palette, model.skill.description, 13.5, {
+      text(model.skill.description, 13.5, {
         color: palette.muted,
         maxLines: 10,
       }),
     );
   if (model.description)
-    blocks.push(
-      textBlock(ctx, palette, model.description, 15, { gapAfter: 4 }),
-    );
+    blocks.push(text(model.description, 15, { gapAfter: 4 }));
 
-  const endboard = () => {
-    blocks.push(sectionTitle(palette, "Final board"));
-    blocks.push(boardBlock(palette, images, model));
+  /** Remaining hand, Graveyard and banished cards. */
+  const leftovers = (area: Frame) => {
+    const list: Block[] = [];
     const hand = model.endboard.hand;
-    blocks.push(
-      textBlock(
-        ctx,
-        palette,
+    list.push(
+      text(
         `Remaining hand: ${hand.length} card${hand.length === 1 ? "" : "s"}`,
         15,
-        {
-          weight: 650,
-        },
+        { weight: 650 },
+        area,
       ),
     );
-    if (hand.length) blocks.push(cardRow(palette, images, hand, thumb));
+    if (hand.length) list.push(cardRow(palette, images, area, hand, thumb));
     if (options.graveyard)
-      blocks.push(
-        textBlock(
-          ctx,
-          palette,
+      list.push(
+        muted(
           `Graveyard: ${countNames(model.endboard.graveyard).join(", ") || "None"}`,
           14,
-          {
-            color: palette.muted,
-          },
+          area,
         ),
       );
     if (options.banished)
-      blocks.push(
-        textBlock(
-          ctx,
-          palette,
+      list.push(
+        muted(
           `Banished: ${countNames(model.endboard.banished).join(", ") || "None"}`,
           14,
-          {
-            color: palette.muted,
-          },
+          area,
         ),
       );
+    return list;
   };
 
-  if (options.layout === "vertical") {
-    if (options.startingHand) {
-      blocks.push(sectionTitle(palette, "Starting hand"));
-      if (model.hand.length) {
-        blocks.push(cardRow(palette, images, model.hand, thumb));
-        blocks.push(
-          textBlock(ctx, palette, countNames(model.hand).join("  ·  "), 13.5, {
-            color: palette.muted,
-          }),
-        );
-      } else
-        blocks.push(
-          textBlock(ctx, palette, "No cards specified.", 15, {
-            color: palette.muted,
-          }),
-        );
+  const endboard = () => {
+    blocks.push(sectionTitle(palette, frame, "Final board"));
+    if (horizontal) {
+      // The field on the left, what is left over beside it.
+      const board = { ...frame, inner: boardWidth(model) };
+      const sideX = board.x + board.inner + 48;
+      const side = { ...frame, x: sideX, inner: frame.x + frame.inner - sideX };
+      blocks.push(
+        sideBySide(
+          [boardBlock(palette, images, board, model)],
+          leftovers(side),
+        ),
+      );
+    } else {
+      blocks.push(boardBlock(palette, images, frame, model));
+      blocks.push(...leftovers(frame));
     }
-    blocks.push(sectionTitle(palette, "Combo steps"));
+  };
+
+  if (options.layout !== "endboard") {
+    if (options.startingHand) {
+      blocks.push(sectionTitle(palette, frame, "Starting hand"));
+      if (model.hand.length) {
+        blocks.push(cardRow(palette, images, frame, model.hand, thumb));
+        blocks.push(muted(countNames(model.hand).join("  ·  "), 13.5));
+      } else blocks.push(muted("No cards specified.", 15));
+    }
+    blocks.push(sectionTitle(palette, frame, "Combo steps"));
     if (model.warning)
+      blocks.push(text(`Warning: ${model.warning}`, 14, { color: "#f87171" }));
+    if (!model.steps.length) blocks.push(muted("No steps recorded.", 15));
+    if (horizontal)
       blocks.push(
-        textBlock(ctx, palette, `Warning: ${model.warning}`, 14, {
-          color: "#f87171",
-        }),
-      );
-    if (!model.steps.length)
-      blocks.push(
-        textBlock(ctx, palette, "No steps recorded.", 15, {
-          color: palette.muted,
-        }),
-      );
-    model.steps.forEach((step, index) =>
-      blocks.push(
-        stepBlock(
+        ...stepTileRows(
           ctx,
           palette,
           images,
-          step,
+          frame,
+          model.steps,
           thumb,
           options.notes,
-          index === model.steps.length - 1,
         ),
-      ),
-    );
+      );
+    else
+      model.steps.forEach((step, index) =>
+        blocks.push(
+          stepBlock(
+            ctx,
+            palette,
+            images,
+            frame,
+            step,
+            thumb,
+            options.notes,
+            index === model.steps.length - 1,
+          ),
+        ),
+      );
     if (options.endboard) endboard();
   } else endboard();
 
   if (options.attribution) {
-    blocks.push(sectionTitle(palette, ""));
+    blocks.push(sectionTitle(palette, frame, ""));
     blocks.push(
-      textBlock(
-        ctx,
-        palette,
+      text(
         "Created with Duel Links Combo Maker · Card effects documented manually; legality not verified.",
         12.5,
         { color: palette.muted, gapAfter: pad - 14 },
@@ -726,7 +929,8 @@ export async function renderPng(
   if (!measure) throw new Error("Canvas is unavailable in this browser.");
   const blocks = buildBlocks(measure, palette, images, model, options);
   const continuation = 54;
-  const limit = pageLimit(options.scale) - continuation;
+  const width = pageWidths[options.layout];
+  const limit = pageLimit(options.scale, width) - continuation;
   const pages = paginate(
     blocks.map((block) => block.height),
     limit,

@@ -262,6 +262,7 @@ function PngTab({
               }
             >
               <option value="vertical">Vertical guide</option>
+              <option value="horizontal">Horizontal guide</option>
               <option value="endboard">Endboard only</option>
             </select>
           </label>
@@ -310,7 +311,7 @@ function PngTab({
         </div>
         <fieldset className="check-grid">
           <legend>Include</legend>
-          {options.layout === "vertical" && (
+          {options.layout !== "endboard" && (
             <>
               <Check
                 label="Starting hand"
