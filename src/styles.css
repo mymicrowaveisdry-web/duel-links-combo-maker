@@ -1356,3 +1356,261 @@ a {
 .field-spacer {
   grid-column: span 3;
 }
+
+/* Setup / Record mode switch. Recording uses the warning color with a dot icon and
+   label, so the state never relies on color alone. */
+.mode-switch {
+  display: inline-flex;
+  padding: 3px;
+  gap: 3px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--control);
+}
+.mode-switch button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 11px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 650;
+}
+.mode-switch button:hover {
+  color: var(--text);
+}
+.mode-switch button[aria-pressed="true"] {
+  color: #f3edff;
+  background: #3a2a5c;
+  border-color: #7c5cb3;
+}
+.mode-switch .record-mode[aria-pressed="true"] {
+  color: #1d1405;
+  background: #fcd34d;
+  border-color: #fcd34d;
+}
+.setup-state.is-recording {
+  color: #fcd34d;
+}
+.group-chip {
+  min-height: 28px;
+  padding: 0 8px;
+  font-size: 0.78rem;
+  border: 1px solid #6b5689;
+}
+
+/* Action menu */
+.action-dialog {
+  width: min(460px, calc(100% - 24px));
+}
+.dialog-subtitle {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.choice-list {
+  display: grid;
+  gap: 2px;
+  margin: 14px 0 0;
+  padding: 8px 10px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  max-height: 260px;
+  overflow: auto;
+}
+.choice-list legend {
+  padding: 0 4px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 650;
+}
+.choice-list label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 36px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.choice-list label:hover {
+  background: var(--control);
+}
+.choice-list label span {
+  display: grid;
+}
+.choice-list small {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+.choice-list input {
+  accent-color: #a78bfa;
+  width: 17px;
+  height: 17px;
+}
+.choice-empty {
+  color: var(--muted);
+  font-size: 0.85rem;
+  padding: 4px 6px;
+}
+.settings-fields.single {
+  grid-template-columns: 1fr;
+  margin-top: 12px;
+}
+.step-preview {
+  margin-top: 12px;
+  padding: 9px 11px;
+  border-left: 3px solid #a78bfa;
+  border-radius: 0 6px 6px 0;
+  background: var(--control);
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+.step-preview span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Recording actions in the details panel */
+.record-actions {
+  display: grid;
+  gap: 8px;
+}
+.record-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+.record-grid .subtle-button {
+  min-height: 38px;
+  padding-inline: 6px;
+  font-size: 0.82rem;
+}
+.more-actions summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-size: 0.84rem;
+  padding: 6px 2px;
+}
+.more-actions form {
+  margin-top: 8px;
+}
+.status-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.status-chips li {
+  padding: 2px 8px;
+  border: 1px solid #7c5cb3;
+  border-radius: 999px;
+  color: #e4d9ff;
+  font-size: 0.76rem;
+}
+.material-list {
+  margin-top: 12px;
+}
+.material-list h4 {
+  margin: 0 0 4px;
+  font-size: 0.84rem;
+  color: var(--muted);
+}
+.material-list ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.material-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.86rem;
+}
+.board-card {
+  position: relative;
+}
+.material-badge {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  z-index: 1;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: #fcd34d;
+  color: #1d1405;
+  font-size: 0.7rem;
+  font-weight: 750;
+  line-height: 18px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Recorded steps (read-only until the timeline lands) */
+.recorded-steps {
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+  margin-top: 16px;
+}
+.recorded-steps h3 {
+  font-size: 0.95rem;
+  margin-bottom: 8px;
+}
+.recorded-steps ol {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.recorded-steps li {
+  display: flex;
+  gap: 9px;
+  padding: 6px 4px;
+  border-radius: 6px;
+  font-size: 0.86rem;
+  line-height: 1.35;
+}
+.recorded-steps li.in-group {
+  margin-left: 18px;
+  padding-left: 8px;
+  border-left: 2px solid #6b5689;
+  border-radius: 0;
+}
+.recorded-steps li.stale {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+.step-number {
+  flex: none;
+  color: var(--accent);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 530px) {
+  .mode-switch button {
+    padding: 0 8px;
+  }
+  .mode-switch button span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}

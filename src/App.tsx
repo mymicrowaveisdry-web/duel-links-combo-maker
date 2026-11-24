@@ -9,15 +9,18 @@ import {
 } from "@dnd-kit/core";
 import type { DragEndEvent, DragStartEvent } from "@dnd-kit/core";
 import {
-  Check,
+  CircleDot,
   ClipboardList,
+  FilePlus2,
   Layers3,
+  PencilRuler,
   Redo2,
-  RotateCcw,
   Swords,
   Undo2,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ActionMenu } from "./components/ActionMenu";
+import type { ActionRequest } from "./components/ActionMenu";
 import { BoardPanel } from "./components/BoardPanel";
 import { BoardSettings } from "./components/BoardSettings";
 import { CatalogPanel } from "./components/CatalogPanel";
@@ -30,16 +33,24 @@ import type { ArtworkLookup } from "./data/artwork";
 import { loadCatalog } from "./data/catalog";
 import type { CardDefinition } from "./data/catalog";
 import { appConfig } from "./config";
+import { buildCardAction, recordingTargetError } from "./domain/actions";
 import { canPlace, zones } from "./domain/board";
 import type { BoardAction, Placement, Position, ZoneId } from "./domain/board";
+import type { ActionKind, ComboAction } from "./domain/combo";
 import {
-  execute,
+  closeGroup,
+  notify,
+  record,
   redo,
+  selectReplay,
+  setMode,
+  setupChange,
   store,
   undo,
   useAppDispatch,
   useAppSelector,
 } from "./store";
+import type { Mode } from "./store";
 
 type Pane = "catalog" | "board" | "setup";
 const panes = [
@@ -57,11 +68,18 @@ export default function App() {
   const [drag, setDrag] = useState<Placement | null>(null);
   const [pane, setPane] = useState<Pane>("board");
   const [settingsError, setSettingsError] = useState("");
+  const [request, setRequest] = useState<ActionRequest | null>(null);
   const settingsDialog = useRef<HTMLDialogElement>(null);
   const dispatch = useAppDispatch();
-  const { board, past, future, notice } = useAppSelector(
-    (state) => state.setup,
+  const { doc, mode, openGroup, past, future, notice } = useAppSelector(
+    (state) => state.combo,
   );
+  const replayed = useAppSelector(selectReplay);
+  // Setup edits the starting board. Recording works on the board after the last step.
+  const recording = mode === "recording";
+  const board = recording
+    ? (replayed.boards.at(-1) ?? doc.initialBoard)
+    : doc.initialBoard;
   const hasHistory = Boolean(past.length || future.length);
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 7 } }),
@@ -95,7 +113,7 @@ export default function App() {
       if (
         !(event.ctrlKey || event.metaKey) ||
         event.altKey ||
-        settingsDialog.current?.open
+        document.querySelector("dialog[open]")
       )
         return;
       if (
@@ -125,15 +143,17 @@ export default function App() {
     return () => window.removeEventListener("beforeunload", onLeave);
   }, [hasHistory]);
 
-  const library = useMemo(
-    () =>
-      new Map(
-        catalog.status === "ready"
-          ? catalog.value.cards.map((card) => [card.id, card])
-          : [],
-      ),
-    [catalog],
-  );
+  // Catalog cards plus the snapshots saved in the combo, so recorded cards always resolve.
+  const library = useMemo(() => {
+    const map = new Map<number, CardDefinition>(
+      catalog.status === "ready"
+        ? catalog.value.cards.map((card) => [card.id, card])
+        : [],
+    );
+    for (const card of Object.values(doc.cards))
+      if (!map.has(card.id)) map.set(card.id, card);
+    return map;
+  }, [catalog, doc.cards]);
   const instance =
     selection?.kind === "instance"
       ? board.instances.find(({ id }) => id === selection.instanceId)
@@ -154,9 +174,10 @@ export default function App() {
 
   function placementError(source: Placement, zone: ZoneId) {
     const card = resolve(source);
-    return card
-      ? canPlace(board, source, card, zone)
-      : "The selected card is unavailable.";
+    if (!card) return "The selected card is unavailable.";
+    return recording
+      ? recordingTargetError(board, source, card, zone, doc.cards)
+      : canPlace(board, source, card, zone);
   }
 
   function changePane(next: Pane, focusHeading = false) {
@@ -177,9 +198,40 @@ export default function App() {
   function place(source: Placement, destination: ZoneId) {
     const card = resolve(source);
     if (!card) return;
-    const valid = !canPlace(board, source, card, destination);
-    dispatch(execute({ type: "place", source, card, destination }));
-    if (valid) setPending(null);
+    const error = placementError(source, destination);
+    if (recording) {
+      // While recording, every movement goes through the action menu.
+      if (!error) {
+        setRequest({ source, card, destination });
+        setPending(null);
+      } else dispatch(notify(error));
+      return;
+    }
+    dispatch(setupChange({ type: "place", source, card, destination }));
+    if (!error) setPending(null);
+  }
+
+  function recordAction(action: ComboAction, newCards: CardDefinition[] = []) {
+    dispatch(record(action, newCards));
+    setRequest(null);
+  }
+
+  function recordCardAction(
+    kind: ActionKind,
+    options?: Parameters<typeof buildCardAction>[3],
+  ) {
+    if (!instance) return;
+    const action = buildCardAction(board, instance.id, kind, options);
+    if ("error" in action) return;
+    recordAction(action);
+    if (kind === "remove-card") select(null);
+  }
+
+  function changeMode(next: Mode) {
+    setPending(null);
+    setRequest(null);
+    select(null);
+    dispatch(setMode(next));
   }
 
   function chooseZone(zone: ZoneId, instanceId?: number) {
@@ -210,7 +262,7 @@ export default function App() {
   function setPose(position: Position, faceUp: boolean) {
     if (instance && selectedCard)
       dispatch(
-        execute({
+        setupChange({
           type: "pose",
           id: instance.id,
           card: selectedCard,
@@ -221,8 +273,8 @@ export default function App() {
   }
 
   function applySettings(action: BoardAction) {
-    dispatch(execute(action));
-    const result = store.getState().setup.notice;
+    dispatch(setupChange(action));
+    const result = store.getState().combo.notice;
     if (result?.error) setSettingsError(result.message);
     else settingsDialog.current?.close();
   }
@@ -253,23 +305,43 @@ export default function App() {
           </div>
         </div>
         <div className="header-controls">
+          <div className="mode-switch" role="group" aria-label="Editing mode">
+            <button
+              type="button"
+              aria-pressed={!recording}
+              onClick={() => changeMode("setup")}
+              title="Edit the starting board"
+            >
+              <PencilRuler size={15} aria-hidden="true" /> <span>Setup</span>
+            </button>
+            <button
+              type="button"
+              aria-pressed={recording}
+              className="record-mode"
+              onClick={() => changeMode("recording")}
+              title="Record board changes as combo steps"
+            >
+              <CircleDot size={15} aria-hidden="true" /> <span>Record</span>
+            </button>
+          </div>
           <button
             type="button"
             className="subtle-button reset-button"
             disabled={!hasHistory}
+            title="Start a new combo. Undo restores the previous one."
             onClick={() => {
               select(null);
               setPending(null);
-              dispatch(execute({ type: "reset" }));
+              dispatch(setupChange({ type: "reset" }));
             }}
           >
-            <RotateCcw size={16} aria-hidden="true" /> <span>Clear Board</span>
+            <FilePlus2 size={16} aria-hidden="true" /> <span>New Combo</span>
           </button>
           <div className="history-buttons">
             <button
               type="button"
               className="icon-button"
-              aria-label="Undo setup change"
+              aria-label="Undo"
               title="Undo (Ctrl/⌘+Z)"
               disabled={!past.length}
               onClick={() => {
@@ -283,7 +355,7 @@ export default function App() {
             <button
               type="button"
               className="icon-button"
-              aria-label="Redo setup change"
+              aria-label="Redo"
               title="Redo (Ctrl/⌘+Shift+Z)"
               disabled={!future.length}
               onClick={() => {
@@ -335,6 +407,7 @@ export default function App() {
               active={pane === "catalog"}
             />
             <BoardPanel
+              recording={recording}
               board={board}
               library={library}
               active={pane === "board"}
@@ -353,6 +426,10 @@ export default function App() {
             />
             <SetupPanel
               active={pane === "setup"}
+              mode={mode}
+              doc={doc}
+              replayed={replayed}
+              onRecordCard={recordCardAction}
               board={board}
               selected={selection}
               card={selectedCard}
@@ -369,8 +446,9 @@ export default function App() {
               onCancel={() => setPending(null)}
               onPose={setPose}
               onRemove={() => {
-                if (instance)
-                  dispatch(execute({ type: "remove", id: instance.id }));
+                if (!instance) return;
+                if (recording) recordCardAction("remove-card");
+                else dispatch(setupChange({ type: "remove", id: instance.id }));
                 select(null);
                 setPending(null);
               }}
@@ -386,8 +464,26 @@ export default function App() {
         </DndContext>
       </ArtworkContext.Provider>
       <footer className="app-footer">
-        <span className="setup-state">
-          <Check size={15} aria-hidden="true" /> Setup Mode
+        <span className={`setup-state ${recording ? "is-recording" : ""}`}>
+          {recording ? (
+            <CircleDot size={15} aria-hidden="true" />
+          ) : (
+            <PencilRuler size={15} aria-hidden="true" />
+          )}{" "}
+          {recording
+            ? `Recording · ${doc.steps.length} step${doc.steps.length === 1 ? "" : "s"}`
+            : "Setup Mode"}
+          {recording && openGroup && (
+            <button
+              type="button"
+              className="text-button group-chip"
+              onClick={() => dispatch(closeGroup())}
+              title="Stop grouping new steps under the last activation"
+            >
+              End group (step{" "}
+              {doc.steps.findIndex(({ id }) => id === openGroup) + 1})
+            </button>
+          )}
         </span>
         <div
           className={notice?.error ? "notice notice-error" : "notice"}
@@ -405,7 +501,8 @@ export default function App() {
               </button>
             </>
           ) : (
-            (notice?.message ?? "Setup stays in this tab.")
+            (notice?.message ??
+            "Set up the starting board, then switch to Record.")
           )}
         </div>
         <a
@@ -416,9 +513,16 @@ export default function App() {
           Card data and images by YGOPRODeck
         </a>
       </footer>
+      <ActionMenu
+        request={request}
+        board={board}
+        cards={doc.cards}
+        onRecord={recordAction}
+        onCancel={() => setRequest(null)}
+      />
       <BoardSettings
         dialog={settingsDialog}
-        board={board}
+        board={doc.initialBoard}
         error={settingsError}
         onSave={applySettings}
       />

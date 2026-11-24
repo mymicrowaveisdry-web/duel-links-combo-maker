@@ -14,7 +14,13 @@ import {
 import { useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import type { CardDefinition } from "../data/catalog";
-import { cardsIn, getZone, sharedZones, zoneName } from "../domain/board";
+import {
+  cardsIn,
+  getZone,
+  materialsOf,
+  sharedZones,
+  zoneName,
+} from "../domain/board";
 import type { Board, Side, Zone, ZoneId } from "../domain/board";
 import { BoardCard } from "./cards";
 
@@ -28,6 +34,8 @@ export interface BoardPanelProps {
   eligibility: ReadonlyMap<ZoneId, string | undefined>;
   onChoose: (zone: ZoneId, instance?: number) => void;
   onSettings: () => void;
+  /** While recording, the hand shows the current hand rather than the opening hand. */
+  recording: boolean;
 }
 
 const zoneIcons: Partial<Record<Zone["kind"], typeof Triangle>> = {
@@ -86,6 +94,7 @@ function DropZone({
             instance={top}
             selected={selectedInstance === top.id}
             onSelect={() => onChoose(zone.id, top.id)}
+            materials={materialsOf(board, top.id).length}
           />
           <span className="occupied-label" aria-hidden="true">
             {zone.label}
@@ -227,10 +236,13 @@ function Hand({ props }: { props: BoardPanelProps }) {
           className="hand-title"
           aria-label="Player Hand"
         >
-          <Layers2 size={17} aria-hidden="true" /> Opening Hand
+          <Layers2 size={17} aria-hidden="true" />{" "}
+          {props.recording ? "Hand" : "Opening Hand"}
         </button>
         <span>
-          {hand.length} / {board.handSize} cards
+          {props.recording
+            ? `${hand.length} card${hand.length === 1 ? "" : "s"}`
+            : `${hand.length} / ${board.handSize} cards`}
         </span>
       </div>
       <div className="hand-cards">
@@ -250,7 +262,11 @@ function Hand({ props }: { props: BoardPanelProps }) {
           );
         })}
         {Array.from(
-          { length: Math.max(0, Math.min(6, board.handSize - hand.length)) },
+          {
+            length: props.recording
+              ? 0
+              : Math.max(0, Math.min(6, board.handSize - hand.length)),
+          },
           (_, index) => (
             <span className="hand-empty" aria-hidden="true" key={index}>
               <Layers2 size={17} />

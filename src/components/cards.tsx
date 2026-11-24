@@ -183,12 +183,14 @@ export function BoardCard({
   selected,
   onSelect,
   compact = false,
+  materials = 0,
 }: {
   card: CardDefinition;
   instance: CardInstance;
   selected: boolean;
   onSelect: () => void;
   compact?: boolean;
+  materials?: number;
 }) {
   const source: Placement = { kind: "instance", instanceId: instance.id };
   const { setNodeRef, isDragging, listeners } = useDraggable({
@@ -202,12 +204,17 @@ export function BoardCard({
       ref={setNodeRef}
       className={`board-card ${compact ? "compact-card" : ""} ${isDragging ? "dragging" : ""}`}
       aria-pressed={selected}
-      aria-label={`${card.name}, copy ${instance.id}, ${pose}`}
+      aria-label={`${card.name}, copy ${instance.id}, ${pose}${materials ? `, ${materials} Xyz material${materials === 1 ? "" : "s"}` : ""}`}
       title={`${card.name} · ${pose}`}
       onClick={onSelect}
       {...listeners}
     >
       <CardFace card={card} instance={instance} />
+      {materials > 0 && (
+        <span className="material-badge" aria-hidden="true">
+          {materials}
+        </span>
+      )}
     </button>
   );
 }

@@ -7,7 +7,12 @@ import {
   Trash2,
 } from "lucide-react";
 import type { CardDefinition } from "../data/catalog";
-import { cardsIn, getZone, zoneName } from "../domain/board";
+import { describeAction } from "../domain/actions";
+import type { buildCardAction } from "../domain/actions";
+import { cardsIn, getZone, materialsOf, zoneName } from "../domain/board";
+import type { ActionKind, ComboDocument, ReplayResult } from "../domain/combo";
+import type { Mode } from "../store";
+import { CardActions } from "./CardActions";
 import type {
   Board,
   CardInstance,
@@ -21,6 +26,10 @@ export type Selection = Placement | { kind: "zone"; zone: ZoneId };
 
 export function SetupPanel({
   active,
+  mode,
+  doc,
+  replayed,
+  onRecordCard,
   board,
   selected,
   card,
@@ -36,6 +45,13 @@ export function SetupPanel({
   onRemove,
 }: {
   active: boolean;
+  mode: Mode;
+  doc: ComboDocument;
+  replayed: ReplayResult;
+  onRecordCard: (
+    kind: ActionKind,
+    options?: Parameters<typeof buildCardAction>[3],
+  ) => void;
   board: Board;
   selected: Selection | null;
   card?: CardDefinition;
@@ -59,6 +75,8 @@ export function SetupPanel({
   const monsterSlot =
     instanceZone?.kind === "monster" || instanceZone?.kind === "extra-monster";
   const link = card?.kinds.includes("Link");
+  const recording = mode === "recording";
+  const materials = instance ? materialsOf(board, instance.id) : [];
   const stats = card
     ? ([
         ["ATK", card.attack],
@@ -129,6 +147,60 @@ export function SetupPanel({
                 )}
               </dl>
             )}
+            {instance &&
+              (instance.markers?.length ||
+                instance.counters ||
+                instance.stats) && (
+                <ul className="status-chips" aria-label="Card status">
+                  {instance.markers?.map((marker) => (
+                    <li key={marker}>{marker}</li>
+                  ))}
+                  {Object.entries(instance.counters ?? {}).map(
+                    ([name, count]) => (
+                      <li key={name}>
+                        {count} {name} Counter{count === 1 ? "" : "s"}
+                      </li>
+                    ),
+                  )}
+                  {Object.entries(instance.stats ?? {}).map(([stat, value]) => (
+                    <li key={stat}>
+                      {stat === "attack"
+                        ? "ATK"
+                        : stat === "defense"
+                          ? "DEF"
+                          : stat[0]!.toUpperCase() + stat.slice(1)}{" "}
+                      {value}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            {materials.length > 0 && (
+              <div className="material-list">
+                <h4>Xyz Materials ({materials.length})</h4>
+                <ul>
+                  {materials.map((row) => (
+                    <li key={row.id}>
+                      <span>
+                        {library.get(row.definitionId)?.name ?? "Unknown card"}
+                      </span>
+                      {recording && (
+                        <button
+                          type="button"
+                          className="text-button"
+                          onClick={() =>
+                            onRecordCard("detach-material", {
+                              material: row.id,
+                            })
+                          }
+                        >
+                          Detach
+                        </button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {card.description && (
               <p className="card-description">{card.description}</p>
             )}
@@ -179,38 +251,54 @@ export function SetupPanel({
                 <Move size={16} aria-hidden="true" />{" "}
                 {instance ? "Move Card" : "Place on Board"}
               </button>
-              {instanceZone?.single && instance && !(monsterSlot && link) && (
-                <div className="deck-actions">
-                  <button
-                    type="button"
-                    className="subtle-button"
-                    onClick={() => onPose(instance.position, !instance.faceUp)}
-                  >
-                    {instance.faceUp ? "Set Face-down" : "Flip Face-up"}
-                  </button>
-                  {monsterSlot && (
+              {recording && instance && instanceZone && (
+                <CardActions
+                  instance={instance}
+                  zone={instanceZone}
+                  link={Boolean(link)}
+                  onRecord={onRecordCard}
+                />
+              )}
+              {!recording &&
+                instanceZone?.single &&
+                instance &&
+                !(monsterSlot && link) && (
+                  <div className="deck-actions">
                     <button
                       type="button"
                       className="subtle-button"
                       onClick={() =>
-                        onPose(
-                          instance.position === "attack" ? "defense" : "attack",
-                          instance.faceUp,
-                        )
+                        onPose(instance.position, !instance.faceUp)
                       }
                     >
-                      {instance.position === "attack" ? "Defense" : "Attack"}
+                      {instance.faceUp ? "Set Face-down" : "Flip Face-up"}
                     </button>
-                  )}
-                </div>
-              )}
+                    {monsterSlot && (
+                      <button
+                        type="button"
+                        className="subtle-button"
+                        onClick={() =>
+                          onPose(
+                            instance.position === "attack"
+                              ? "defense"
+                              : "attack",
+                            instance.faceUp,
+                          )
+                        }
+                      >
+                        {instance.position === "attack" ? "Defense" : "Attack"}
+                      </button>
+                    )}
+                  </div>
+                )}
               {instance && (
                 <button
                   type="button"
                   className="remove-button"
                   onClick={onRemove}
                 >
-                  <Trash2 size={15} aria-hidden="true" /> Remove Card
+                  <Trash2 size={15} aria-hidden="true" />{" "}
+                  {recording ? "Remove from the Duel" : "Remove Card"}
                 </button>
               )}
             </div>
@@ -247,6 +335,7 @@ export function SetupPanel({
             <p>Select a card to view its details or drag it onto the field.</p>
           </div>
         )}
+        <RecordedSteps doc={doc} replayed={replayed} />
         <div className="setup-summary">
           <h3>Starting State</h3>
           {summary.map(([id, label]) => (
@@ -263,5 +352,51 @@ export function SetupPanel({
         </div>
       </div>
     </aside>
+  );
+}
+
+/** Read-only list of recorded steps. Editing and playback arrive with the timeline. */
+function RecordedSteps({
+  doc,
+  replayed,
+}: {
+  doc: ComboDocument;
+  replayed: ReplayResult;
+}) {
+  if (!doc.steps.length) return null;
+  const failure = replayed.failure;
+  return (
+    <section className="recorded-steps" aria-labelledby="recorded-steps-title">
+      <h3 id="recorded-steps-title">Recorded Steps</h3>
+      {failure && (
+        <p className="form-error" role="alert">
+          {failure.index < 0
+            ? failure.message
+            : `Step ${failure.index + 1} no longer applies: ${failure.message}`}
+        </p>
+      )}
+      <ol>
+        {doc.steps.map((step, index) => {
+          const before = replayed.boards[index];
+          const text =
+            step.customDescription ??
+            (before
+              ? describeAction(step.action, before, doc.cards)
+              : "Not replayed.");
+          const member = step.groupId && step.groupId !== step.id;
+          return (
+            <li
+              key={step.id}
+              className={`${member ? "in-group" : ""} ${before ? "" : "stale"}`}
+            >
+              <span className="step-number">
+                {String(index + 1).padStart(2, "0")}
+              </span>
+              <span>{text}</span>
+            </li>
+          );
+        })}
+      </ol>
+    </section>
   );
 }
