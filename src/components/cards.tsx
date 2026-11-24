@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { useArtwork } from "../data/artwork";
+import { isCustom } from "../data/custom-cards";
 import { artworkIdOf, isPlaceholder } from "../data/placeholders";
 import type { CardDefinition } from "../data/catalog";
 import type { CardInstance, Placement } from "../domain/board";
@@ -66,9 +67,13 @@ export function CardFace({
   return <FrontFace card={card} defense={instance?.position === "defense"} />;
 }
 
-/** Returns the mirrored image URL until it fails to load, then undefined for the text fallback. */
+/**
+ * Returns the card's image URL until it fails to load, then undefined for the text
+ * fallback. Custom cards use their own embedded image, other cards the mirror.
+ */
 function useCardImage(card: CardDefinition) {
-  const url = useArtwork(artworkIdOf(card));
+  const mirrored = useArtwork(artworkIdOf(card));
+  const url = card.custom ? card.image : mirrored;
   const [broken, setBroken] = useState<string>();
   return {
     src: url && url !== broken ? url : undefined,
@@ -110,7 +115,7 @@ function FrontFace({
   const image = useCardImage(card);
   return (
     <span
-      className={`card-face tone-${cardStyle(card)} ${defense ? "in-defense" : ""} ${image.src ? "has-image" : ""} ${isPlaceholder(card) ? "is-placeholder" : ""}`}
+      className={`card-face tone-${cardStyle(card)} ${defense ? "in-defense" : ""} ${image.src ? "has-image" : ""} ${isPlaceholder(card) ? "is-placeholder" : ""} ${isCustom(card) ? "is-custom" : ""}`}
       aria-hidden="true"
     >
       {image.src ? (
@@ -181,7 +186,11 @@ export function CatalogRow({
       <span className="catalog-card-text">
         <strong>{card.name}</strong>
         <small>
-          {isPlaceholder(card) ? "Placeholder, not a real card" : card.type}
+          {isPlaceholder(card)
+            ? "Placeholder, not a real card"
+            : isCustom(card)
+              ? `Custom card, not from the dataset · ${card.type}`
+              : card.type}
         </small>
       </span>
       <GripVertical className="drag-grip" size={15} aria-hidden="true" />

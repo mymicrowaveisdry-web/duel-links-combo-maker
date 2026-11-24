@@ -1,6 +1,7 @@
 import {
   ChevronLeft,
   ChevronRight,
+  Plus,
   Search,
   SlidersHorizontal,
 } from "lucide-react";
@@ -27,12 +28,17 @@ export function CatalogPanel({
   active,
   placeholders,
   onCreatePlaceholder,
+  customCards,
+  onNewCustom,
 }: {
   data: CatalogState;
   selectedId?: number;
   /** Archetype placeholders created in this session or found in the open combo. */
   placeholders: readonly CardDefinition[];
   onCreatePlaceholder: (archetype: string) => void;
+  /** The author's custom cards plus any custom cards in the open combo. */
+  customCards: CardDefinition[];
+  onNewCustom: () => void;
   onSelect: (card: CardDefinition) => void;
   onRetry: () => void;
   active: boolean;
@@ -40,25 +46,34 @@ export function CatalogPanel({
   const [filters, setFilters] = useState(emptyFilters);
   const [filtersOpen, toggleFilters] = useState(false);
   const [page, setPage] = useState(0);
-  const [showPlaceholders, setShowPlaceholders] = useState(false);
+  const [view, setView] = useState<"catalog" | "placeholders" | "custom">(
+    "catalog",
+  );
+  const showPlaceholders = view === "placeholders";
+  const special = view !== "catalog";
   const [placeholderArchetype, setPlaceholderArchetype] = useState("");
   const catalogCards = data.status === "ready" ? data.value.cards : noCards;
   const placeholderCards = useMemo(
     () => [...genericPlaceholders, ...placeholders],
     [placeholders],
   );
-  const cards = showPlaceholders ? placeholderCards : catalogCards;
+  const cards =
+    view === "placeholders"
+      ? placeholderCards
+      : view === "custom"
+        ? customCards
+        : catalogCards;
   const index = useMemo(() => indexCards(cards), [cards]);
   const deferredFilters = useDeferredValue(filters);
   const results = useMemo(
     () =>
       filterCards(
         index,
-        showPlaceholders
+        special
           ? { ...emptyFilters, query: deferredFilters.query }
           : deferredFilters,
       ),
-    [index, deferredFilters, showPlaceholders],
+    [index, deferredFilters, special],
   );
   const attributes = useMemo(
     () =>
@@ -131,9 +146,9 @@ export function CatalogPanel({
         >
           <button
             type="button"
-            aria-pressed={!filters.category && !showPlaceholders}
+            aria-pressed={!filters.category && view === "catalog"}
             onClick={() => {
-              setShowPlaceholders(false);
+              setView("catalog");
               update("category", "");
             }}
           >
@@ -143,9 +158,9 @@ export function CatalogPanel({
             <button
               type="button"
               key={category}
-              aria-pressed={!showPlaceholders && filters.category === category}
+              aria-pressed={view === "catalog" && filters.category === category}
               onClick={() => {
-                setShowPlaceholders(false);
+                setView("catalog");
                 update("category", category);
               }}
             >
@@ -157,11 +172,22 @@ export function CatalogPanel({
             aria-pressed={showPlaceholders}
             title="Stand-ins such as Any card or Any Spell Card"
             onClick={() => {
-              setShowPlaceholders(true);
+              setView("placeholders");
               setPage(0);
             }}
           >
             Placeholders
+          </button>
+          <button
+            type="button"
+            aria-pressed={view === "custom"}
+            title="Your own cards for ones missing from the dataset"
+            onClick={() => {
+              setView("custom");
+              setPage(0);
+            }}
+          >
+            Custom
           </button>
         </div>
         {showPlaceholders && (
@@ -196,7 +222,19 @@ export function CatalogPanel({
             </button>
           </form>
         )}
-        {filtersOpen && !showPlaceholders && (
+        {view === "custom" && (
+          <div className="placeholder-maker">
+            <button
+              type="button"
+              className="subtle-button"
+              onClick={onNewCustom}
+            >
+              <Plus size={15} aria-hidden="true" />
+              New Custom Card
+            </button>
+          </div>
+        )}
+        {filtersOpen && !special && (
           <div className="filter-grid">
             <label>
               Monster type
@@ -305,7 +343,11 @@ export function CatalogPanel({
         <>
           <p className="results-count" role="status">
             {results.length.toLocaleString("en")}{" "}
-            {showPlaceholders ? "placeholders" : "cards"}
+            {view === "placeholders"
+              ? "placeholders"
+              : view === "custom"
+                ? "custom cards"
+                : "cards"}
           </p>
           <div className="card-results" key={current}>
             {pageRows.map((card) => (
@@ -318,7 +360,9 @@ export function CatalogPanel({
             ))}
             {!results.length && (
               <p className="panel-message">
-                No cards match. Adjust your search or filters.
+                {view === "custom" && !cards.length
+                  ? "No custom cards yet. Create one for a card missing from the dataset."
+                  : "No cards match. Adjust your search or filters."}
               </p>
             )}
           </div>

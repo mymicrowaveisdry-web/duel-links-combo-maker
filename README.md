@@ -5,6 +5,8 @@ A browser-local editor for documenting Yu-Gi-Oh! Duel Links Speed Duel combos. S
 ## Features
 
 - Search and filter the Duel Links card catalog, and drag or tap cards onto a Speed Duel field.
+- Opening-hand placeholders such as Any Spell Card or an archetype placeholder, alternative starters for a hand slot, and the turn order.
+- Custom cards for cards missing from the dataset, with optional stats and a local image. They are saved in this browser, marked as custom everywhere and carried in JSON backups.
 - **Setup** edits the starting board. **Record** turns each move into a typed step through an action menu, with atomic summons, Xyz materials and grouped effects. **Replay** steps through the combo without changing it.
 - A timeline with editable descriptions and notes, insertion, reordering, deletion, repair of steps that no longer apply, playback at 0.5–2× and full undo/redo.
 - Character (free text) and Skill selection from a bundled Skill snapshot or a custom Skill. A combo keeps the Skill text it was written with.

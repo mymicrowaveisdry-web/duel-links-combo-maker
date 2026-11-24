@@ -39,6 +39,8 @@ export function comboText(model: ExportModel, options: TextOptions): string {
   }
   label("Format", model.format);
   label("Turn order", model.going ?? "Not specified");
+  if (model.customCards.length)
+    label("Custom cards (not from the dataset)", model.customCards.join(", "));
   label("Character", model.character ?? "Not specified");
   label(
     "Skill",

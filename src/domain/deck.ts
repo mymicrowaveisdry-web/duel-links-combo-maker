@@ -95,7 +95,8 @@ export function deckWarnings(
         level: "warning",
         message: `${count} copies of ${name}. Decks allow at most 3.`,
       });
-  const unknown = real.filter((card) => !inCatalog(card.id));
+  // Custom cards are missing from the catalog by definition.
+  const unknown = real.filter((card) => !card.custom && !inCatalog(card.id));
   if (unknown.length)
     warnings.push({
       level: "warning",

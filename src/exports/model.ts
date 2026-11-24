@@ -39,6 +39,8 @@ export interface ExportModel {
   format: string;
   /** "Going first" or "Going second" when specified. */
   going?: string;
+  /** Names of author-made cards in the combo, which are not from the dataset. */
+  customCards: string[];
   character?: string;
   skill?: { name: string; description?: string; custom: boolean };
   hand: ExportCard[];
@@ -145,6 +147,9 @@ export function buildExportModel(
     ...(doc.description ? { description: doc.description } : {}),
     format: "Duel Links - Speed Duel",
     ...(start.going ? { going: `Going ${start.going}` } : {}),
+    customCards: Object.values(doc.cards)
+      .filter((card) => card.custom)
+      .map((card) => card.name),
     ...(doc.character ? { character: doc.character.name } : {}),
     ...(doc.skill
       ? {

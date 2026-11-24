@@ -3,6 +3,7 @@ import {
   ClipboardList,
   Layers2,
   Move,
+  Pencil,
   Plus,
   Trash2,
 } from "lucide-react";
@@ -47,6 +48,7 @@ export function SetupPanel({
   onAddAlternative,
   onRemoveAlternative,
   onCancelAlternative,
+  onEditCustom,
 }: {
   active: boolean;
   mode: Mode;
@@ -74,6 +76,7 @@ export function SetupPanel({
   onAddAlternative: () => void;
   onRemoveAlternative: (definitionId: number) => void;
   onCancelAlternative: () => void;
+  onEditCustom: (card: CardDefinition) => void;
 }) {
   const zone = selected?.kind === "zone" ? getZone(selected.zone) : undefined;
   const instanceZone = instance ? getZone(instance.zone) : undefined;
@@ -144,8 +147,23 @@ export function SetupPanel({
                     Copy {instance?.id} · {zoneName(instanceZone)}
                   </small>
                 )}
+                {card.custom && (
+                  <small className="custom-note">
+                    Custom card, not from the dataset
+                  </small>
+                )}
               </div>
             </div>
+            {card.custom && mode !== "replay" && (
+              <button
+                type="button"
+                className="subtle-button"
+                onClick={() => onEditCustom(card)}
+              >
+                <Pencil size={15} aria-hidden="true" />
+                Edit Custom Card
+              </button>
+            )}
             {stats.some(([, value]) => value !== undefined) && (
               <dl className="card-stats">
                 {stats.map(([label, value]) =>

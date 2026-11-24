@@ -2,6 +2,7 @@
 // viewport. Card art comes only from same-origin images, so the canvas is never
 // tainted, and any missing image is drawn as a readable text placeholder.
 import type { CardDefinition } from "../data/catalog";
+import { isCustom } from "../data/custom-cards";
 import { artworkIdOf, isPlaceholder } from "../data/placeholders";
 import { cardLine, countNames } from "./model";
 import type { ExportCard, ExportModel, ExportSlot } from "./model";
@@ -197,8 +198,9 @@ function drawCard(
     }
   } else if (image) {
     ctx.drawImage(image, x, y, w, h);
-    // Placeholders show Token art, so their own label must stay readable.
-    if (card.card && isPlaceholder(card.card)) {
+    // Placeholders show Token art and custom images may lack a name, so both get
+    // a readable label and a tag that marks them as not from the dataset.
+    if (card.card && (isPlaceholder(card.card) || isCustom(card.card))) {
       const size = Math.max(8, Math.round(w / 7.5));
       setFont(ctx, size, 700);
       const lines = wrapLines(
@@ -243,6 +245,19 @@ function drawCard(
           size / 3,
       );
     });
+    ctx.textAlign = "left";
+  }
+  const unverified =
+    faceUp && card.card && (isPlaceholder(card.card) || isCustom(card.card));
+  if (unverified && card.card) {
+    const tag = isPlaceholder(card.card) ? "Placeholder" : "Custom";
+    const tagSize = Math.max(7, Math.round(w / 10));
+    setFont(ctx, tagSize, 700);
+    ctx.fillStyle = "#120e1be6";
+    ctx.fillRect(x, y, w, tagSize + 5);
+    ctx.fillStyle = tag === "Custom" ? "#fcd34d" : "#c4b5fd";
+    ctx.textAlign = "center";
+    ctx.fillText(tag, x + w / 2, y + tagSize + 1);
     ctx.textAlign = "left";
   }
   ctx.restore();
@@ -645,7 +660,7 @@ export async function loadImages(
     unique.map(
       (card) =>
         new Promise<[number, HTMLImageElement] | null>((resolve) => {
-          const url = urlFor(artworkIdOf(card));
+          const url = card.custom ? card.image : urlFor(artworkIdOf(card));
           if (!url) return resolve(null);
           const image = new Image();
           const timer = setTimeout(() => resolve(null), 8000);

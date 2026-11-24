@@ -43,6 +43,17 @@ export const cardSchema = z.object({
   placeholder: z.enum(["wildcard", "typed"]).optional(),
   /** Card whose artwork represents this definition, used by placeholders. */
   artworkId: z.number().int().nonnegative().optional(),
+  /** Made by the author because the card is missing from the dataset (guide §8.6). */
+  custom: z.literal(true).optional(),
+  /**
+   * A custom card's own image, resized in the browser and embedded so backups stay
+   * portable. Only raster data URLs are accepted, never SVG or remote URLs.
+   */
+  image: z
+    .string()
+    .max(400_000)
+    .regex(/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/)
+    .optional(),
 });
 
 export const catalogSchema = z.object({
