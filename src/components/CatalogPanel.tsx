@@ -8,6 +8,7 @@ import { useDeferredValue, useMemo, useState } from "react";
 import { emptyFilters, filterCards, indexCards } from "../data/catalog";
 import type { CardDefinition, Catalog, CardFilters } from "../data/catalog";
 import { monsterKinds } from "../data/catalog-schema.mjs";
+import { genericPlaceholders } from "../data/placeholders";
 import { CatalogRow } from "./cards";
 
 const pageSize = 30;
@@ -24,9 +25,14 @@ export function CatalogPanel({
   onSelect,
   onRetry,
   active,
+  placeholders,
+  onCreatePlaceholder,
 }: {
   data: CatalogState;
   selectedId?: number;
+  /** Archetype placeholders created in this session or found in the open combo. */
+  placeholders: readonly CardDefinition[];
+  onCreatePlaceholder: (archetype: string) => void;
   onSelect: (card: CardDefinition) => void;
   onRetry: () => void;
   active: boolean;
@@ -34,12 +40,25 @@ export function CatalogPanel({
   const [filters, setFilters] = useState(emptyFilters);
   const [filtersOpen, toggleFilters] = useState(false);
   const [page, setPage] = useState(0);
-  const cards = data.status === "ready" ? data.value.cards : noCards;
+  const [showPlaceholders, setShowPlaceholders] = useState(false);
+  const [placeholderArchetype, setPlaceholderArchetype] = useState("");
+  const catalogCards = data.status === "ready" ? data.value.cards : noCards;
+  const placeholderCards = useMemo(
+    () => [...genericPlaceholders, ...placeholders],
+    [placeholders],
+  );
+  const cards = showPlaceholders ? placeholderCards : catalogCards;
   const index = useMemo(() => indexCards(cards), [cards]);
   const deferredFilters = useDeferredValue(filters);
   const results = useMemo(
-    () => filterCards(index, deferredFilters),
-    [index, deferredFilters],
+    () =>
+      filterCards(
+        index,
+        showPlaceholders
+          ? { ...emptyFilters, query: deferredFilters.query }
+          : deferredFilters,
+      ),
+    [index, deferredFilters, showPlaceholders],
   );
   const attributes = useMemo(
     () =>
@@ -54,10 +73,12 @@ export function CatalogPanel({
     () =>
       [
         ...new Set(
-          cards.flatMap((card) => (card.archetype ? [card.archetype] : [])),
+          catalogCards.flatMap((card) =>
+            card.archetype ? [card.archetype] : [],
+          ),
         ),
       ].sort(),
-    [cards],
+    [catalogCards],
   );
   const totalPages = Math.max(1, Math.ceil(results.length / pageSize));
   const current = Math.min(page, totalPages - 1);
@@ -110,8 +131,11 @@ export function CatalogPanel({
         >
           <button
             type="button"
-            aria-pressed={!filters.category}
-            onClick={() => update("category", "")}
+            aria-pressed={!filters.category && !showPlaceholders}
+            onClick={() => {
+              setShowPlaceholders(false);
+              update("category", "");
+            }}
           >
             All
           </button>
@@ -119,14 +143,60 @@ export function CatalogPanel({
             <button
               type="button"
               key={category}
-              aria-pressed={filters.category === category}
-              onClick={() => update("category", category)}
+              aria-pressed={!showPlaceholders && filters.category === category}
+              onClick={() => {
+                setShowPlaceholders(false);
+                update("category", category);
+              }}
             >
               {category}
             </button>
           ))}
+          <button
+            type="button"
+            aria-pressed={showPlaceholders}
+            title="Stand-ins such as Any card or Any Spell Card"
+            onClick={() => {
+              setShowPlaceholders(true);
+              setPage(0);
+            }}
+          >
+            Placeholders
+          </button>
         </div>
-        {filtersOpen && (
+        {showPlaceholders && (
+          <form
+            className="placeholder-maker"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (placeholderArchetype)
+                onCreatePlaceholder(placeholderArchetype);
+            }}
+          >
+            <label>
+              Archetype placeholder
+              <select
+                value={placeholderArchetype}
+                onChange={(event) =>
+                  setPlaceholderArchetype(event.target.value)
+                }
+              >
+                <option value="">Choose an archetype</option>
+                {archetypes.map((archetype) => (
+                  <option key={archetype}>{archetype}</option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="submit"
+              className="subtle-button"
+              disabled={!placeholderArchetype}
+            >
+              Add
+            </button>
+          </form>
+        )}
+        {filtersOpen && !showPlaceholders && (
           <div className="filter-grid">
             <label>
               Monster type
@@ -234,7 +304,8 @@ export function CatalogPanel({
       {data.status === "ready" && (
         <>
           <p className="results-count" role="status">
-            {results.length.toLocaleString("en")} cards
+            {results.length.toLocaleString("en")}{" "}
+            {showPlaceholders ? "placeholders" : "cards"}
           </p>
           <div className="card-results" key={current}>
             {pageRows.map((card) => (

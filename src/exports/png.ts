@@ -2,6 +2,7 @@
 // viewport. Card art comes only from same-origin images, so the canvas is never
 // tainted, and any missing image is drawn as a readable text placeholder.
 import type { CardDefinition } from "../data/catalog";
+import { artworkIdOf, isPlaceholder } from "../data/placeholders";
 import { cardLine, countNames } from "./model";
 import type { ExportCard, ExportModel, ExportSlot } from "./model";
 
@@ -196,6 +197,29 @@ function drawCard(
     }
   } else if (image) {
     ctx.drawImage(image, x, y, w, h);
+    // Placeholders show Token art, so their own label must stay readable.
+    if (card.card && isPlaceholder(card.card)) {
+      const size = Math.max(8, Math.round(w / 7.5));
+      setFont(ctx, size, 700);
+      const lines = wrapLines(
+        (t) => ctx.measureText(t).width,
+        card.name,
+        w - 6,
+      ).slice(0, 3);
+      const band = lines.length * size * 1.15 + 6;
+      ctx.fillStyle = "#120e1be6";
+      ctx.fillRect(x, y + h - band, w, band);
+      ctx.fillStyle = "#fff8ff";
+      ctx.textAlign = "center";
+      lines.forEach((line, index) =>
+        ctx.fillText(
+          line,
+          x + w / 2,
+          y + h - band + 3 + size + index * size * 1.15 - 2,
+        ),
+      );
+      ctx.textAlign = "left";
+    }
   } else {
     ctx.fillStyle = palette.surface;
     ctx.fillRect(x, y, w, h);
@@ -480,7 +504,7 @@ function buildBlocks(
     textBlock(
       ctx,
       palette,
-      `${model.format}${model.character ? `  ·  ${model.character}` : ""}`,
+      `${model.format}${model.going ? `  ·  ${model.going}` : ""}${model.character ? `  ·  ${model.character}` : ""}`,
       15,
       {
         color: palette.muted,
@@ -621,7 +645,7 @@ export async function loadImages(
     unique.map(
       (card) =>
         new Promise<[number, HTMLImageElement] | null>((resolve) => {
-          const url = urlFor(card.id);
+          const url = urlFor(artworkIdOf(card));
           if (!url) return resolve(null);
           const image = new Image();
           const timer = setTimeout(() => resolve(null), 8000);

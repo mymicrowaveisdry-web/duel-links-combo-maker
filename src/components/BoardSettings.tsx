@@ -34,6 +34,9 @@ export function BoardSettings({
           player: values.has("player-pendulum"),
           opponent: values.has("opponent-pendulum"),
         },
+        ...(values.get("going") === "first" || values.get("going") === "second"
+          ? { going: values.get("going") as "first" | "second" }
+          : {}),
       },
     });
   }
@@ -106,6 +109,14 @@ export function BoardSettings({
               {phases.map((phase) => (
                 <option key={phase}>{phase}</option>
               ))}
+            </select>
+          </label>
+          <label>
+            Turn order
+            <select name="going" defaultValue={board.going ?? ""}>
+              <option value="">Not specified</option>
+              <option value="first">Going first</option>
+              <option value="second">Going second</option>
             </select>
           </label>
           <label>

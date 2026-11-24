@@ -43,6 +43,7 @@ import { CardFace } from "./components/cards";
 import { ArtworkContext, loadArtwork, noArtwork } from "./data/artwork";
 import type { ArtworkLookup } from "./data/artwork";
 import { loadCatalog } from "./data/catalog";
+import { archetypePlaceholder, genericPlaceholders } from "./data/placeholders";
 import type { CardDefinition } from "./data/catalog";
 import { appConfig } from "./config";
 import {
@@ -144,6 +145,12 @@ export default function App() {
   const [playing, setPlaying] = useState<object | null>(null);
   const [confirmReplace, setConfirmReplace] = useState(false);
   const [skillOpen, setSkillOpen] = useState(false);
+  // Opening-hand slot waiting for an alternative card from the browser.
+  const [alternativeFor, setAlternativeFor] = useState<number | null>(null);
+  // Archetype placeholders created in this session.
+  const [madePlaceholders, setMadePlaceholders] = useState<CardDefinition[]>(
+    [],
+  );
   const [exportOpen, setExportOpen] = useState(false);
   const [combosOpen, setCombosOpen] = useState(false);
   const [restored, setRestored] = useState(false);
@@ -294,10 +301,22 @@ export default function App() {
         ? catalog.value.cards.map((card) => [card.id, card])
         : [],
     );
-    for (const card of Object.values(doc.cards))
+    for (const card of [
+      ...genericPlaceholders,
+      ...madePlaceholders,
+      ...Object.values(doc.cards),
+    ])
       if (!map.has(card.id)) map.set(card.id, card);
     return map;
-  }, [catalog, doc.cards]);
+  }, [catalog, doc.cards, madePlaceholders]);
+  // Archetype placeholders made here or already used in the open combo.
+  const archetypePlaceholders = useMemo(() => {
+    const generic = new Set(genericPlaceholders.map(({ id }) => id));
+    const found = new Map<number, CardDefinition>();
+    for (const card of [...madePlaceholders, ...Object.values(doc.cards)])
+      if (card.placeholder && !generic.has(card.id)) found.set(card.id, card);
+    return [...found.values()];
+  }, [madePlaceholders, doc.cards]);
   const instance =
     selection?.kind === "instance"
       ? board.instances.find(({ id }) => id === selection.instanceId)
@@ -340,6 +359,28 @@ export default function App() {
   }
 
   function choose(selection: Selection) {
+    if (alternativeFor !== null && selection.kind === "catalog") {
+      const slot = board.instances.find(({ id }) => id === alternativeFor);
+      const pick = library.get(selection.definitionId);
+      if (slot && pick) {
+        const current = (slot.alternatives ?? []).flatMap((id) => {
+          const known = library.get(id);
+          return known ? [known] : [];
+        });
+        dispatch(
+          setupChange({
+            type: "alternatives",
+            id: slot.id,
+            cards: [...current, pick],
+          }),
+        );
+      }
+      setAlternativeFor(null);
+      select({ kind: "instance", instanceId: alternativeFor });
+      showSide("setup", true);
+      return;
+    }
+    setAlternativeFor(null);
     select(selection);
     setPending(null);
     showSide("setup", true);
@@ -486,6 +527,7 @@ export default function App() {
   }
 
   function changeMode(next: Mode) {
+    setAlternativeFor(null);
     setPending(null);
     setRequest(null);
     setPlaying(null);
@@ -686,6 +728,16 @@ export default function App() {
           <main id="workspace" className="workspace" tabIndex={-1}>
             <CatalogPanel
               data={catalog}
+              placeholders={archetypePlaceholders}
+              onCreatePlaceholder={(archetype) => {
+                const made = archetypePlaceholder(archetype);
+                setMadePlaceholders((list) =>
+                  list.some(({ id }) => id === made.id)
+                    ? list
+                    : [...list, made],
+                );
+                choose({ kind: "catalog", definitionId: made.id });
+              }}
               selectedId={
                 selection?.kind === "catalog"
                   ? selection.definitionId
@@ -856,6 +908,26 @@ export default function App() {
                 }}
                 onCancel={() => setPending(null)}
                 onPose={setPose}
+                alternativePicking={alternativeFor !== null}
+                onAddAlternative={() => {
+                  if (!instance) return;
+                  setAlternativeFor(instance.id);
+                  changePane("catalog", true);
+                }}
+                onRemoveAlternative={(definitionId) => {
+                  if (!instance) return;
+                  dispatch(
+                    setupChange({
+                      type: "alternatives",
+                      id: instance.id,
+                      cards: (instance.alternatives ?? []).flatMap((id) => {
+                        const known = library.get(id);
+                        return known && id !== definitionId ? [known] : [];
+                      }),
+                    }),
+                  );
+                }}
+                onCancelAlternative={() => setAlternativeFor(null)}
                 onRemove={() => {
                   if (!instance) return;
                   if (recording) recordCardAction("remove-card");

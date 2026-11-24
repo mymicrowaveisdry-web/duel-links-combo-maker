@@ -36,6 +36,13 @@ export const cardSchema = z.object({
   scale: rating,
   attack: stat,
   defense: stat,
+  /**
+   * Opening-hand placeholders such as "Any Spell Card". They are not real cards:
+   * "wildcard" placeholders may go in any zone, the others follow their category.
+   */
+  placeholder: z.enum(["wildcard", "typed"]).optional(),
+  /** Card whose artwork represents this definition, used by placeholders. */
+  artworkId: z.number().int().nonnegative().optional(),
 });
 
 export const catalogSchema = z.object({

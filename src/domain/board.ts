@@ -110,6 +110,8 @@ export interface CardInstance {
   stats?: Partial<Record<StatKey, number>>;
   /** Manual status markers such as "Negated" or "Effect used". */
   markers?: string[];
+  /** Other cards that could fill this opening-hand slot, by definition ID. */
+  alternatives?: number[];
 }
 
 export interface Board {
@@ -121,6 +123,8 @@ export interface Board {
   turn: number;
   active: Side;
   phase: Phase;
+  /** Whether the documented player goes first or second. Unset means unspecified. */
+  going?: "first" | "second";
 }
 
 export function createBoard(): Board {
@@ -174,8 +178,14 @@ export type BoardAction =
       type: "settings";
       settings: Pick<
         Board,
-        "life" | "turn" | "active" | "phase" | "handSize" | "pendulum"
+        "life" | "turn" | "active" | "phase" | "handSize" | "pendulum" | "going"
       >;
+    }
+  | {
+      /** Sets the alternative cards for an opening-hand slot. */
+      type: "alternatives";
+      id: number;
+      cards: CardDefinition[];
     }
   | {
       /** Replaces the player's Main Deck and Extra Deck, as when importing a YDK file. */
@@ -222,6 +232,8 @@ export function zoneRule(
 ): string | undefined {
   if (zone.kind === "pendulum" && zone.side && !board.pendulum[zone.side])
     return "Enable dedicated Pendulum Zones in board settings.";
+  // "Any card"-style placeholders stand for a card of unknown type.
+  if (card.placeholder === "wildcard") return undefined;
   if (
     (zone.kind === "monster" || zone.kind === "extra-monster") &&
     card.category !== "Monster" &&
@@ -357,10 +369,39 @@ export function applyBoardAction(board: Board, action: BoardAction): Result {
           ok: false,
           message: "Empty the dedicated Pendulum Zones before disabling them.",
         };
+      const next: Board = { ...board, ...settings };
+      if (!settings.going) delete next.going;
       return {
         ok: true,
-        board: { ...board, ...settings },
+        board: next,
         message: "Board settings updated.",
+      };
+    }
+    case "alternatives": {
+      const instance = board.instances.find(({ id }) => id === action.id);
+      if (!instance || getZone(instance.zone).kind !== "hand")
+        return { ok: false, message: "Choose a card in the hand." };
+      const ids = [...new Set(action.cards.map(({ id }) => id))].filter(
+        (id) => id !== instance.definitionId,
+      );
+      if (ids.length > 8)
+        return {
+          ok: false,
+          message: "A hand slot can list up to 8 alternatives.",
+        };
+      const instances = board.instances.map((row) => {
+        if (row.id !== action.id) return row;
+        const copy = { ...row };
+        if (ids.length) copy.alternatives = ids;
+        else delete copy.alternatives;
+        return copy;
+      });
+      return {
+        ok: true,
+        board: { ...board, instances },
+        message: ids.length
+          ? `This hand slot now has ${ids.length} alternative${ids.length === 1 ? "" : "s"}.`
+          : "Alternatives cleared.",
       };
     }
     case "load-deck": {

@@ -153,7 +153,9 @@ const combo = createSlice({
             ? [action.card]
             : action.type === "load-deck"
               ? [...action.main, ...action.extra]
-              : [];
+              : action.type === "alternatives"
+                ? action.cards
+                : [];
         const next: ComboDocument = {
           ...doc,
           initialBoard: result.board,

@@ -84,8 +84,10 @@ export function deckWarnings(
       level: "info",
       message: `Extra Deck has ${extra.length} cards. The in-game capacity depends on unlocked slots and is unconfirmed.`,
     });
+  // Placeholders stand for unknown cards, so copy and catalog checks skip them.
+  const real = [...main, ...extra].filter((card) => !card.placeholder);
   const copies = new Map<string, number>();
-  for (const card of [...main, ...extra])
+  for (const card of real)
     copies.set(card.name, (copies.get(card.name) ?? 0) + 1);
   for (const [name, count] of copies)
     if (count > 3)
@@ -93,7 +95,7 @@ export function deckWarnings(
         level: "warning",
         message: `${count} copies of ${name}. Decks allow at most 3.`,
       });
-  const unknown = [...main, ...extra].filter((card) => !inCatalog(card.id));
+  const unknown = real.filter((card) => !inCatalog(card.id));
   if (unknown.length)
     warnings.push({
       level: "warning",

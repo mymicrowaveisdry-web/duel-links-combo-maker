@@ -33,6 +33,7 @@ const instanceSchema = z.object({
   counters: z.record(text(40), whole.nonnegative()).optional(),
   stats: z.partialRecord(z.enum(statKeys), whole.min(0).max(99_999)).optional(),
   markers: z.array(text(60)).max(20).optional(),
+  alternatives: z.array(whole.nonnegative()).max(8).optional(),
 });
 
 const boardSchema = z.object({
@@ -44,6 +45,7 @@ const boardSchema = z.object({
   turn: whole.min(1).max(999),
   active: side,
   phase: z.enum(phases),
+  going: z.enum(["first", "second"]).optional(),
 });
 
 const at = z.enum(["top", "bottom"]).optional();

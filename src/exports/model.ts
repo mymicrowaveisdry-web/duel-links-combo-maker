@@ -14,6 +14,8 @@ export interface ExportCard {
   materials: string[];
   counters: string[];
   markers: string[];
+  /** Other cards that could fill this hand slot. */
+  alternatives: string[];
 }
 
 export interface ExportStep {
@@ -35,6 +37,8 @@ export interface ExportModel {
   title: string;
   description?: string;
   format: string;
+  /** "Going first" or "Going second" when specified. */
+  going?: string;
   character?: string;
   skill?: { name: string; description?: string; custom: boolean };
   hand: ExportCard[];
@@ -73,7 +77,15 @@ export function exportCard(
         `${count} ${counter} Counter${count === 1 ? "" : "s"}`,
     ),
     markers: row.markers ?? [],
+    alternatives: (row.alternatives ?? []).map(nameOf),
   };
+}
+
+/** "Magician's Rod (or Skilled Dark Magician)" for slots with alternatives. */
+export function slotName(card: ExportCard) {
+  return card.alternatives.length
+    ? `${card.name} (or ${card.alternatives.join(" or ")})`
+    : card.name;
 }
 
 export function buildExportModel(
@@ -132,6 +144,7 @@ export function buildExportModel(
     title: doc.title,
     ...(doc.description ? { description: doc.description } : {}),
     format: "Duel Links - Speed Duel",
+    ...(start.going ? { going: `Going ${start.going}` } : {}),
     ...(doc.character ? { character: doc.character.name } : {}),
     ...(doc.skill
       ? {
@@ -176,7 +189,10 @@ export function buildExportModel(
 /** Groups identical names as "2x Name" while keeping first-seen order. */
 export function countNames(cards: readonly ExportCard[]) {
   const counts = new Map<string, number>();
-  for (const { name } of cards) counts.set(name, (counts.get(name) ?? 0) + 1);
+  for (const card of cards) {
+    const name = slotName(card);
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
   return [...counts].map(([name, count]) => `${count}x ${name}`);
 }
 

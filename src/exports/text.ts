@@ -38,6 +38,7 @@ export function comboText(model: ExportModel, options: TextOptions): string {
     lines.push("");
   }
   label("Format", model.format);
+  label("Turn order", model.going ?? "Not specified");
   label("Character", model.character ?? "Not specified");
   label(
     "Skill",
